@@ -14,6 +14,10 @@ python3 svd.py --svdfac 8 --decompose 1 --decompose_ffn 1   \
 python3 svd.py --svdfac 8 --decompose 1 --decompose_ffn 1   \
     --orig_model /data/models/RWKV-5-World-1B5-v2-20231025-ctx4096
 
+python3 svd.py --svdfac 8 --decompose 1 --decompose_ffn 1   \
+    --orig_model /data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/L2-D768-x052/rwkv-init
+
+
 # recover: 
 #       our decmoposed model (finetuned) ---> a model in the original format, save to *pth 
 python3 svd.py --decompose 0 
@@ -115,7 +119,7 @@ def decompose_emb(args):
     
 def full_to_svd(w,args):
     selfkeys = [".att.receptance.", ".att.key.", ".att.value.", ".att.gate."]
-    if args.decompose_ffn: 
+    if args.decompose_ffn == 1: 
         selfkeys += [".ffn.receptance."]
 
     # xzl: all params saved in bfloat16 in model file
@@ -353,6 +357,10 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     
+    # dbg
+    args.n_layer = 2
+    args.n_embd = 768
+
     # .1B
     # args.n_layer = 12   
     # args.n_embd = 768
@@ -362,8 +370,8 @@ if __name__ == '__main__':
     # args.n_embd = 1024
 
     # 1.5B
-    args.n_layer = 24   # xzl: so we cannot figure out automatically???
-    args.n_embd = 2048
+    # args.n_layer = 24   # xzl: so we cannot figure out automatically???
+    # args.n_embd = 2048
 
     # 3B
     # args.n_layer = 32   # xzl: so we cannot figure out automatically???

@@ -1,13 +1,19 @@
 #
-MODEL_TYPE="x052" # x052 => rwkv-5.2 (rwkv-5 final)
+# MODEL_TYPE="x052" # x052 => rwkv-5.2 (rwkv-5 final)
 # MODEL_TYPE="x052xzl" # my mods, both att and ffn (also dump wkv op), ffn only has key decomposed
 # MODEL_TYPE="x052xzlNoReLu" # same as above, except no SqrRelu between decomposed LEFT/RIGHT matrices
+
+MODEL_TYPE="x052xzlTune" # save as above, finetune
 
 # MODEL_TYPE="x052attDiag" # my mods, att only + Diag
 # MODEL_TYPE="x052att" # my mods, att only
 
 # MODEL_TYPE="x060" # x060 => rwkv-6.0
 # MODEL_TYPE="mamba" # pip install mamba_ssm --upgrade
+
+# dbg
+N_LAYER="2"
+N_EMBD="768"
 
 # 0.1B
 # N_LAYER="12"
@@ -18,8 +24,8 @@ MODEL_TYPE="x052" # x052 => rwkv-5.2 (rwkv-5 final)
 # N_EMBD="1024"
 
 # .4B
-N_LAYER="24"
-N_EMBD="1024"
+# N_LAYER="24"
+# N_EMBD="1024"
 
 # 1.5B
 # N_LAYER="24"

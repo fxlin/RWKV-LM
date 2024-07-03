@@ -1015,13 +1015,14 @@ class RWKV_CMix_x052(MyModule):
         self.value = nn.Linear(args.dim_ffn, args.n_embd, bias=False)
 
     @MyFunction
-    def forward(self, x):
+    def forward(self, x): 
         xx = self.time_shift(x) # xzl: also, mix with prev timestep (not all the way to the beginning
         xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
         xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
         k = self.key(xk)
         k = torch.relu(k) ** 2  #xzl: sqr relu
         kv = self.value(k)
+        # breakpoint()
         return torch.sigmoid(self.receptance(xr)) * kv
 
 class RWKV_CMix_x052_r(MyModule):
@@ -1086,6 +1087,7 @@ class RWKV_CMix_x052_r(MyModule):
         if self.hasrelu:
             r = torch.relu(r) ** 2
         r = self.receptance2(r)
+        # breakpoint()
         return torch.sigmoid(r) * kv
 
 class RWKV_CMix_x052_rkv(MyModule):
@@ -1488,7 +1490,7 @@ class RWKV(pl.LightningModule):
         #       it seems to have (almost) identical interfacea s torch.optim.AdamW
         if args.weight_decay > 0:
             optim_groups += [{"params": [param_dict[n] for n in lr_decay], "weight_decay": args.weight_decay, "my_lr_scale": 1.0}]
-            if platform.system() == 'Darwin': 
+            if platform.system() == 'Darwin': # Mac
                 return torch.optim.AdamW(optim_groups, 
                                          lr=self.args.lr_init, 
                                          betas=self.args.betas, 
@@ -1611,6 +1613,11 @@ class RWKV(pl.LightningModule):
             else: 
                 logits = self(idx)          # xzl: a fwd pass...
                 loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+                # xzl: dump gradient graph
+                # import torchviz
+                # dot=torchviz.make_dot(logits, params=dict(self.named_parameters()))
+                # dot.render("mymodel", format="png")
+                # breakpoint()
 
             # if '0' in os.environ["RWKV_MY_TESTING"]:
             #     print('logits', logits)   
@@ -1722,7 +1729,8 @@ class RWKV(pl.LightningModule):
 
                     # zero = [".att.output.", ".ffn.value.", ".ffn.receptance.", ".ffnPre.value.", ".ffnPre.receptance.", "head_q.", '.oo.', '.rr.']
                     # xzl: to include .att.output{1|2} .ffn.value{1|2}. .ffn.receptance{1|2}
-                    zero = [".att.output", ".ffn.value", ".ffn.receptance", ".ffnPre.value.", ".ffnPre.receptance.", "head_q.", '.oo.', '.rr.']
+                    # zero = [".att.output", ".ffn.value", ".ffn.receptance", ".ffnPre.value.", ".ffnPre.receptance.", "head_q.", '.oo.', '.rr.']
+                    zero = [".att.output", ".ffn.value", ".ffnPre.value.", ".ffnPre.receptance.", "head_q.", '.oo.', '.rr.']
 
                     for kk in zero:
                         if kk in n:

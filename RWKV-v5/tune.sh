@@ -21,17 +21,23 @@ MODEL_TYPE="x052xzlTune" # save as above, finetune
 # MODEL_TYPE="x060" # x060 => rwkv-6.0
 # MODEL_TYPE="mamba" # pip install mamba_ssm --upgrade
 #
+
+# dbg
+N_LAYER="2"
+N_EMBD="768"
+
 # N_LAYER="12"
 # N_EMBD="768"
 
-N_LAYER="24"
-N_EMBD="1024"
+# N_LAYER="24"
+# N_EMBD="1024"
 
 # N_LAYER="24"
 # N_EMBD="2048"
 
-SVDFAC="8"
-# SVDFAC="4"
+# SVDFAC="8"
+SVDFAC="4"
+# SVDFAC="1"
 
 PROJ_DIR="out/L"$N_LAYER"-D"$N_EMBD"-F"$SVDFAC"-"$MODEL_TYPE # set output folder
 #
@@ -65,7 +71,8 @@ GPU_PER_NODE=1
 
 # WANDB=rwkv-dbg
 # WANDB=rwkv-tune
-WANDB=
+WANDB=rwkv-tune-dbg
+# WANDB=
 
 # !!! change magic_prime if you change ctx_len !!!
 
@@ -87,6 +94,7 @@ python3 train.py --load_model "0" --wandb "$WANDB"  --proj_dir $PROJ_DIR --my_te
  --weight_decay 0.001 --epoch_save $EPOCH_SAVE --head_size_a 64 \
  --accelerator gpu --devices $GPU_PER_NODE --precision bf16 --strategy deepspeed_stage_2 --grad_cp $GRAD_CP --enable_progress_bar True --ds_bucket_mb $DS_BUCKET_MB \
  --svdfac $SVDFAC   \
- --NoReLu   1       \
+ --NoReLu   0       \
  --load_partial 1   \
- --finetune 1     # cf train.py "args.finetune"
+ --lm_eval_0    0   \
+ --finetune 0     # cf train.py "args.finetune"
