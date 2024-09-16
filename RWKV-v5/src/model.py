@@ -1273,9 +1273,10 @@ class RWKV_CMix_x0595_rkv(MyModule):
         # orig scale 0
         self.value1 = nn.Linear(args.dim_ffn, args.dim_ffn//args.svdfac, bias=False)
         self.value2 = nn.Linear(args.dim_ffn//args.svdfac, args.n_embd, bias=False)
-        self.value_diag = nn.Parameter(torch.ones(args.dim_ffn))
+        # self.value_diag = nn.Parameter(torch.ones(args.dim_ffn))
+        self.value_diag = nn.Parameter(torch.ones(args.n_embd))     # xzl
 
-    @MyFunction
+    # @MyFunction
     def forward(self, x):
         xx = self.time_shift(x) # xzl: also, mix with prev timestep (not all the way to the beginning
         xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
@@ -1294,19 +1295,28 @@ class RWKV_CMix_x0595_rkv(MyModule):
             - more compute + memory (which is against our rule)
 
         '''
-        k1 = xk * self.key_diag             
-        k1 = k1.sum(dim=-1, keepdim=True)  
-        k += k1
 
+        k1 = xk * self.key_diag         # element-wise mul
+        # FL: here, k1 lastdim is n_emb. k (after up proj) lastdim=dim_ffn, e.g. 3.5x n_emb
+        # to add k&k1, have to match their dim. the problem is how
+        # k1 = k1.sum(dim=-1, keepdim=True)  # WC
+        # k += k1  # WC
+        # -- FL's: dont add k&k1, just pass k1 through ... 
+        k1 = torch.relu(k1) ** 2
+
+        # main branch...
         k = torch.relu(k) ** 2  #xzl: sqr relu, in original design 
 
+        # main branch...
         kv = self.value1(k)
         if self.hasrelu:
             kv = torch.relu(kv) ** 2        
-        kv = self.value2(kv)
-        v1 = k * self.value_diag
-        v1 = v1.sum(dim=-1, keepdim=True)
-        kv += v1
+        kv = self.value2(kv)   # xzl: down proj .. after this kv lastdim=n_emb
+        k1 = k1 * self.value_diag     # xzl: element wise mul
+        kv += k1        # xzl: merge 
+        # v1 = k * self.value_diag
+        # v1 = v1.sum(dim=-1, keepdim=True)
+        # kv += v1
 
         # Wr mod
         r = self.receptance1(xr)
