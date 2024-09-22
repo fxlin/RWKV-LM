@@ -1276,7 +1276,7 @@ class RWKV_CMix_x0595_rkv(MyModule):
         # self.value_diag = nn.Parameter(torch.ones(args.dim_ffn))
         self.value_diag = nn.Parameter(torch.ones(args.n_embd))     # xzl
 
-    # @MyFunction
+    @MyFunction
     def forward(self, x):
         xx = self.time_shift(x) # xzl: also, mix with prev timestep (not all the way to the beginning
         xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
@@ -1296,7 +1296,7 @@ class RWKV_CMix_x0595_rkv(MyModule):
 
         '''
 
-        k1 = xk * self.key_diag         # element-wise mul
+        k1 = xk * self.key_diag         # element-wise mul, same as xk @ diag(key_diag)
         # FL: here, k1 lastdim is n_emb. k (after up proj) lastdim=dim_ffn, e.g. 3.5x n_emb
         # to add k&k1, have to match their dim. the problem is how
         # k1 = k1.sum(dim=-1, keepdim=True)  # WC

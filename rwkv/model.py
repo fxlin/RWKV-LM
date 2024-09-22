@@ -707,7 +707,7 @@ class RWKV(MyModule):
         out = r * matmul(vx, vw, vmx, vrx, vmy, vry)
         return x + out, xx
     
-    # xzl: ours, based on above
+    # xzl: ours, based on above, cf ffn_seq_v5_95
     @MyFunction
     def ffn_one_v5_95(self, x, sx, ln_w, ln_b, k_mix, r_mix, 
                      kw1, kw2, kwdiag,
@@ -731,23 +731,30 @@ class RWKV(MyModule):
         k = matmul(kx, kw1, kmx, krx, kmy, kry)
         k = torch.relu(k) ** 2
         k = matmul(k, kw2, kmx, krx, kmy, kry)
-        k1 = kx @ torch.diag(kwdiag)
-        k += F.pad(k1,(0, k.shape[-1] - k1.shape[-1]))
+        # k1 = kx @ torch.diag(kwdiag)      # WC
+        # k += F.pad(k1,(0, k.shape[-1] - k1.shape[-1]))   # WC 
 
-        vx = torch.relu(k) ** 2
+        vx = torch.relu(k) ** 2     # from orig design
+
         v = matmul(vx, vw1, vmx, vrx, vmy, vry)
         v = torch.relu(v) ** 2
         v = matmul(v, vw2, vmx, vrx, vmy, vry)
-        v1 = k @ torch.diag(vwdiag)
+        # v1 = k @ torch.diag(vwdiag)       # WC 
         
-        if len(v1.shape) == 1:
-            v1_trunc = v1[:v.shape[-1]]
-        elif len(v1.shape) == 2:
-            v1_trunc = v1[:, :v.shape[-1]]
-        else:
-            v1_trunc = v1[:, :, :v.shape[-1]]
+        # xzl: below the diag branch
+        k1 = kx @ torch.diag(kwdiag)
+        k1 = torch.relu(k1) ** 2   # not merge 
+        v1 = k1 @ torch.diag(vwdiag)  
+        v += v1     # merge w/ the main branch
 
-        v += v1_trunc
+        # WC below 
+        # if len(v1.shape) == 1:
+        #     v1_trunc = v1[:v.shape[-1]]
+        # elif len(v1.shape) == 2:
+        #     v1_trunc = v1[:, :v.shape[-1]]
+        # else:
+        #     v1_trunc = v1[:, :, :v.shape[-1]]
+        # v += v1_trunc
 
         out = r * v
         return x + out, xx
@@ -787,7 +794,9 @@ class RWKV(MyModule):
         rx = xx * r_mix + sx * (1 - r_mix)
 
         r = torch.sigmoid(matmul(rx, rw, rmx, rrx, rmy, rry))
+        # xzl: up project, k 
         vx = torch.relu(matmul(kx, kw, kmx, krx, kmy, kry)) ** 2
+        # xzl: down project, v; then *r
         out = r * matmul(vx, vw, vmx, vrx, vmy, vry)
         return x + out, xx[-1,:]
 
@@ -812,12 +821,18 @@ class RWKV(MyModule):
         return x + out, xx[-1,:]
     
     # xzl: ours, based on above
+    # rw1, rw2: receptance1.weight receptance2.weight    
+    # ?mx, ?rx, ?my, ?ry - optional prequantized int8 weight (?), cf ~1753, 1873
     @MyFunction
     def ffn_seq_v5_9(self, x, sx, ln_w, ln_b, k_mix, r_mix,  kw, vw,
                      rw1, rw2, rwdiag, 
+                     # optional prequantized int8 weight (?) for kw
                      kmx, krx, kmy, kry, 
+                     # optional prequantized int8 weight (?) for vw
                      vmx, vrx, vmy, vry, 
+                     # optional prequantized int8 weight (?) for rw1
                      rmx1, rrx1, rmy1, rry1,
+                     # optional prequantized int8 weight (?) for rw2
                      rmx2, rrx2, rmy2, rry2,
                      ):
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
@@ -844,10 +859,14 @@ class RWKV(MyModule):
     def ffn_seq_v5_95(self, x, sx, ln_w, ln_b, k_mix, r_mix, 
                          kw1, kw2, kwdiag,
                          vw1, vw2, vwdiag,
-                         rw1, rw2, rwdiag, 
+                         rw1, rw2, rwdiag,
+                         # cf line 1910 
                          kmx, krx, kmy, kry, 
+                         # cf line 1910
                          vmx, vrx, vmy, vry, 
+                         # optional prequantized int8 weight (?) for rw1
                          rmx1, rrx1, rmy1, rry1,
+                         # optional prequantized int8 weight (?) for rw2
                          rmx2, rrx2, rmy2, rry2,
                          ):
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
@@ -855,6 +874,7 @@ class RWKV(MyModule):
         kx = xx * k_mix + sx * (1 - k_mix)
         rx = xx * r_mix + sx * (1 - r_mix)
 
+        # receptance 
         # r = torch.sigmoid(matmul(rx, rw, rmx, rrx, rmy, rry)) # orig
         r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         r = torch.relu(r) ** 2
@@ -862,25 +882,34 @@ class RWKV(MyModule):
         r += rx @ torch.diag(rwdiag)   # xzl: use matmul??
         r = torch.sigmoid(r)        
 
+        # up proj (k)
+        # vx = torch.relu(matmul(kx, kw, kmx, krx, kmy, kry)) ** 2 # orig
         k = matmul(kx, kw1, kmx, krx, kmy, kry)
         k = torch.relu(k) ** 2
         k = matmul(k, kw2, kmx, krx, kmy, kry)
-        k1 = kx @ torch.diag(kwdiag)
-        k += F.pad(k1,(0, k.shape[-1] - k1.shape[-1]))
+        # k += F.pad(k1,(0, k.shape[-1] - k1.shape[-1]))   # WC
 
-        vx = torch.relu(k) ** 2
+        vx = torch.relu(k) ** 2   # from orig design
+
+        # down proj (v)
         v = matmul(vx, vw1, vmx, vrx, vmy, vry)
         v = torch.relu(v) ** 2
         v = matmul(v, vw2, vmx, vrx, vmy, vry)
-        v1 = k @ torch.diag(vwdiag)
 
-        if len(v1.shape) == 1:
-            v1_trunc = v1[:v.shape[-1]]
-        elif len(v1.shape) == 2:
-            v1_trunc = v1[:, :v.shape[-1]]
-        else:
-            v1_trunc = v1[:, :, :v.shape[-1]]
-        v += v1_trunc
+        # xzl: below the diag branch
+        k1 = kx @ torch.diag(kwdiag)
+        k1 = torch.relu(k1) ** 2   # not merge 
+        v1 = k1 @ torch.diag(vwdiag)  
+        v += v1     # merge w/ the main branch
+
+        # WC below
+        # if len(v1.shape) == 1:
+        #     v1_trunc = v1[:v.shape[-1]]
+        # elif len(v1.shape) == 2:
+        #     v1_trunc = v1[:, :v.shape[-1]]
+        # else:
+        #     v1_trunc = v1[:, :, :v.shape[-1]]
+        # v += v1_trunc
 
         out = r * v
         return x + out, xx[-1,:]
@@ -1895,6 +1924,8 @@ class RWKV(MyModule):
                     kw = kw.to(device=dev, non_blocking=True)
                     vw = vw.to(device=dev, non_blocking=True)
                     rw = rw.to(device=dev, non_blocking=True)
+                # xzl: in theory we would need kmx1,kmx2... but... 
+                assert wtype != torch.uint8  # xzl: okay as long as this
                 kmx = w[f'{ffn}key.weight_mx'] if wtype == torch.uint8 else x
                 krx = w[f'{ffn}key.weight_rx'] if wtype == torch.uint8 else x
                 kmy = w[f'{ffn}key.weight_my'] if wtype == torch.uint8 else x
