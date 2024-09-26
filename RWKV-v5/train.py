@@ -124,7 +124,7 @@ if __name__ == "__main__":
         "L24-D2048-ctx2048-pretrain": [1,1,4,8],      # 1B5 OOM: bsz=6 for A100 40GB ... 
         "L24-D1024-ctx2048-pretrain": [2,6,8,16],      # 04B. OOM: bsz=20 for A100 80GB; bsz=10 for A100 40GB ... why?
         "L24-D1024-ctx2048-finetune": [2,6,14,16], 
-        "L12-D768-ctx2048-pretrain" : [2,8,18,24], 
+        "L12-D768-ctx2048-pretrain" : [2,8,16,24],      #01B OOM bsz=18 for A40 40GB
         "L12-D768-ctx2048-finetune" : [2,10,20,30],
     }
     vram_idx = -1
