@@ -180,22 +180,23 @@ def do_eval(model_path, isverbose=False, benchmarks=[]):
     def my_print(s):
         print(s, end='', flush=True)
 
-    pipeline.generate(ctx, token_count=50, args=args, callback=my_print)
+    pipeline.generate(ctx, token_count=200, args=args, callback=my_print)
 
     print("========================================================================")
     if model.stat_runs != 0:    # if model has collected any stat? print it
         print(f"stats: runs: {model.stat_runs} \
         cls/run {model.stat_loaded_cls/model.stat_runs:.2f} \
         avg %loaded {model.stat_loaded_tokens/model.stat_runs/65535:.2f}")
-        print(f"forward {model.stat_time_fwd:.2f}")
+        print(f"forward {model.stat_time_fwd - model.stat_time_quant:.2f} (s)")
         print(f"att {model.stat_time_att:.2f}")
-        print(f"ffn {model.stat_time_ffn:.2f}")
+        print(f"ffn {model.stat_time_ffn - model.stat_time_quant:.2f}")
         print(f"\tmlp {model.stat_time_mlp:.2f}")
-        print(f"\tquant {model.stat_time_quant:.2f}")
+        print(f"\t(excluded) quant {model.stat_time_quant:.2f}")
         print(f"\tffn: rx @ rw {model.stat_time_ffn_rx_rw:.2f}")
         print(f"\tffn: kx @ kw {model.stat_time_ffn_kx_kw:.2f}")
         print(f"\tffn: vx @ vw {model.stat_time_ffn_vx_vw:.2f}")
         print(f"cls {model.stat_time_cls:.2f}")
+        print(f"{model.stat_runs/(model.stat_time_fwd - model.stat_time_quant):.2f} token/s")
     print("========================================================================")
 
     #RWKV_PAD = pipeline.tokenizer.encode('\n') # we will use '\n' as PAD
