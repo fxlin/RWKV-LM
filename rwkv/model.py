@@ -674,6 +674,7 @@ class RWKV(MyModule):
                     #args.load_token_cls='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/from-hpc/rwkv-823-cls.npy'
                     #args.load_token_cls='models/01b-x59-cls.npy'
                     #args.load_token_cls='models/04b-x59-cls.npy'
+                    pass
                 
                 K=args.head_K
                 labels = np.load(args.load_token_cls)
