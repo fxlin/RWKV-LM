@@ -26,7 +26,7 @@ from lm_eval.api.model import TemplateLM
 
 ########################################################################################################
 
-MODEL_NAME=f'models/04b-x59'
+MODEL_NAME=f'models/official-0.1b'
 CLS_MODEL_NAME=f'models/04b-x59-cls.npy'
 
 eval_tasks = ['lambada_openai']
@@ -158,8 +158,11 @@ def do_eval(model_path, isverbose=False, benchmarks=[]):
     mlp_map = [0.7] * 24
 
     # 8/26/24: using fp16 will make some benchmarks (eg openai) nan... so use fp32
-    model = RWKV(model=model_path, strategy='cuda fp16', verbose=isverbose,
-                 quant_bit=quant_bit, quant_map=quant_map, mlp_map=mlp_map)
+    if "official" in model_path:
+        model = RWKV(model=model_path, strategy='cuda fp16', verbose=isverbose)
+    else:
+        model = RWKV(model=model_path, strategy='cuda fp16', verbose=isverbose,
+                     quant_bit=quant_bit, quant_map=quant_map, mlp_map=mlp_map)
     # model = RWKV(model=model_path, strategy='cuda fp32', verbose=isverbose)    # nneded for cls
     pipeline = PIPELINE(model, "rwkv_vocab_v20230424")
 
