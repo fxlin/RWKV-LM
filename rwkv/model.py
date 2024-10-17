@@ -2114,7 +2114,6 @@ class RWKV(MyModule):
         # (done) scatter_known_time > proj_known_time (~1.5x-2x), to optimize
         #   idea: since the # of predicted CLS is likely small, we may bundle them in one tensor
         # (with padding), do projection & scatter in one go.
-        num_tokens=0
         sum_known_logits_exp = torch.tensor(0.0, device="cpu")  # sum of exp(logits) for all "known" clusters
 
         proj_known_time = 0.0 
@@ -2145,7 +2144,7 @@ class RWKV(MyModule):
             # idx = torch.tensor(self.clusters[cls], device='cuda')
             idx = self.clusters_tensor[cls]
 
-            num_tokens += idx.shape[0]
+            #num_tokens += idx.shape[0]
 
             # Collect indices and logits
             all_idx.append(idx)
@@ -2240,9 +2239,7 @@ class RWKV(MyModule):
             # breakpoint()
 
         # update statistics
-        self.stat_runs += 1
         self.stat_loaded_cls += len(CLS)
-        self.stat_loaded_tokens += num_tokens
         
         # -- sanity check ---- ... expensive 
         if False: 
@@ -2390,6 +2387,7 @@ class RWKV(MyModule):
             time_measure['ffn_kx_kw'] = 0
             time_measure['ffn_vx_vw'] = 0
             time_measure['fwd_start'] = time.time()
+            num_tokens = 0
 
             # xzl: init state
             if state == None:
@@ -3277,7 +3275,7 @@ class RWKV(MyModule):
                     # update statistics
                     self.stat_runs += 1
                     self.stat_loaded_cls += len(CLS)
-                    self.stat_loaded_tokens += num_tokens
+                    #self.stat_loaded_tokens += num_tokens
                     
                     # -- sanity check ---- ... expensive 
                     if False: 
@@ -3377,13 +3375,18 @@ class RWKV(MyModule):
                     new_x = []
                     self.cached_orgx = x
                     for row in x:
-                        new_x.append(self._retrieve_value3_jit(row, self.head_l1_weight, self.head_l2org_weight))
+                        temp_x = self._retrieve_value3_jit(row, self.head_l1_weight, self.head_l2org_weight)
+                        new_x.append(temp_x)
+                        num_tokens += x.shape[0]
                     x = torch.stack(new_x)
                 else:
                     x = self._retrieve_value3_jit(x, self.head_l1_weight, self.head_l2org_weight)
+                    num_tokens += x.shape[0]
+                self.stat_loaded_tokens += num_tokens
 
             elif w['head.weight'].dtype != torch.uint8:  # original cls head
                 x = x @ w['head.weight']
+                num_tokens = x.shape[0]
             else:   # orig cls head, but int8
                 if seq_mode and full_output:                    
                     x = mm8_seq(x, w['head.weight'], w['head.weight_mx'], w['head.weight_rx'], w['head.weight_my'], w['head.weight_ry'])
@@ -3412,6 +3415,8 @@ class RWKV(MyModule):
             self.stat_time_ffn_kx_kw += time_measure["ffn_kx_kw"]
             self.stat_time_ffn_vx_vw += time_measure["ffn_vx_vw"]
             self.stat_time_cls += time_measure["cls_exec"]        
+            self.stat_runs += 1
+            self.stat_loaded_tokens += num_tokens
             # breakpoint()
 
             if self.sparse_outpath is not None:
