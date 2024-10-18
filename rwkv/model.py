@@ -1871,7 +1871,9 @@ class RWKV(MyModule):
     @MyFunction
     def att_seq_v5_8(self, x, sx, s, ln_w, ln_b, lx_w, lx_b, k_mix, v_mix, r_mix, g_mix, t_decay, t_first, 
                      kw1,kw2, vw1,vw2, rw1,rw2, gw1,gw2, 
-                     ow, kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry, gmx, grx, gmy, gry, omx, orx, omy, ory):
+                     ow, 
+                     kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry, gmx, grx, gmy, gry, 
+                     omx, orx, omy, ory):
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
         sx = torch.cat((sx.unsqueeze(0), xx[:-1,:]))
         kx = xx * k_mix + sx * (1 - k_mix)
@@ -2589,10 +2591,14 @@ class RWKV(MyModule):
                         # kw, vw, rw, gw, 
                         kw1,kw2, vw1,vw2, rw1,rw2, gw1,gw2, # sans "diag"
                         ow,
-                        kmx, krx, kmy, kry,
-                        vmx, vrx, vmy, vry,
-                        rmx, rrx, rmy, rry,
-                        gmx, grx, gmy, gry,
+                        kmx1, krx1, kmy1, kry1,
+                        kmx2, krx2, kmy2, kry2,
+                        vmx1, vrx1, vmy1, vry1,
+                        vmx2, vrx2, vmy2, vry2,
+                        rmx1, rrx1, rmy1, rry1,
+                        rmx2, rrx2, rmy2, rry2,
+                        gmx1, grx1, gmy1, gry1,
+                        gmx2, grx2, gmy2, gry2,
                         omx, orx, omy, ory,
                         )
                 elif self.version in [5.9, 5.94, 5.95, 5.96]:
