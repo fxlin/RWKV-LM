@@ -8,6 +8,7 @@ import types, gc, os, time, re
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from .emb_lookup import EmbeddingLookupTable
 # import matplotlib.pyplot as plt
 
 
@@ -278,7 +279,8 @@ if os.environ.get('RWKV_DML_ON') == '1':
 
 class RWKV(MyModule):
     def __init__(self, model, strategy, verbose = True, convert_and_save_and_exit = None,
-                 sparse_outpath = None, quant_bit = None, quant_map = None, mlp_map = None):
+                 sparse_outpath = None, quant_bit = None, quant_map = None, mlp_map = None,
+                 load_token_cls = None):
         super().__init__()
         if verbose:
             prxxx = lambda *args, **kwargs: print(*args, **kwargs)
@@ -300,6 +302,8 @@ class RWKV(MyModule):
         self.stat_time_ffn_kx_kw = 0.0
         self.stat_time_ffn_vx_vw = 0.0
 
+        self.lazy_emb = True
+
         self.sparse_outpath = sparse_outpath # collect sparse data inf FFN
 
         # hyperparams for quantization and MLP
@@ -317,6 +321,8 @@ class RWKV(MyModule):
         args = self.args
         args.MODEL_NAME = model
         args.strategy_string = strategy
+
+        args.load_token_cls = load_token_cls
 
         # Rescale for fp16 mode: set x = x/2 every X layer (to avoid fp16 overflow)
         try:
@@ -475,6 +481,9 @@ class RWKV(MyModule):
                     w['emb.weight'] = F.layer_norm(w['emb.weight'].float(), (args.n_embd,), weight=w['blocks.0.ln0.weight'].float(), bias=w['blocks.0.ln0.bias'].float())
                 del w['blocks.0.ln0.weight']
                 del w['blocks.0.ln0.bias']
+
+            if self.lazy_emb:
+                self.emb = EmbeddingLookupTable(w['emb.weight'], args.n_embd, w['emb.weight'].shape[0])
 
             print_need_newline = False
 
@@ -663,7 +672,10 @@ class RWKV(MyModule):
                     args.load_token_cls='/data/models/pi-deployment/rwkv-823-cls.npy'
                 else: 
                     # args.load_token_cls='/data/home/bfr4xr/RWKV-LM/RWKV-v5/out/01b-pre-x59-8x-cls/from-hpc/rwkv-823-cls.npy'
-                    args.load_token_cls='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/from-hpc/rwkv-823-cls.npy'
+                    #args.load_token_cls='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/from-hpc/rwkv-823-cls.npy'
+                    #args.load_token_cls='models/01b-x59-cls.npy'
+                    #args.load_token_cls='models/04b-x59-cls.npy'
+                    pass
                 
                 K=args.head_K
                 labels = np.load(args.load_token_cls)
@@ -698,8 +710,7 @@ class RWKV(MyModule):
                 # each tensor: 1D (#tokens_per_cls). for tensor computation later .
                 for ccc in self.clusters:
                     self.clusters_tensor.append(
-                        # torch.tensor(ccc, device='cuda'))
-                        torch.tensor(ccc, device='cpu'))   # convert later? 
+                        torch.tensor(ccc))
 
                 # build head_l2, but by splitting the original cls head weights
                 self.head_l2org_weight = []
@@ -977,10 +988,11 @@ class RWKV(MyModule):
             mlp_pred = torch.relu(kx @ mlpfc1) @ mlpfc2  # logits
             mlp_pred = torch.sigmoid(mlp_pred) 
             mlp_pred = (mlp_pred > thr).int()
+        mlp_exec_end_t = time.time()
 
         # --- quant pred, n bit    
-        quant_exec_start_t = time.time()
         quant_pred = None
+        quant_exec_start_t = time.time()
         if quant_weight is not None:
             kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
             kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit)
@@ -993,7 +1005,7 @@ class RWKV(MyModule):
         quant_exec_end_t = time.time()
 
 
-        time_measure['mlp_exec'] += quant_exec_start_t - mlp_exec_start_t
+        time_measure['mlp_exec'] += mlp_exec_end_t - mlp_exec_start_t
         time_measure['quant_exec'] += quant_exec_end_t - quant_exec_start_t
 
         pred = None
@@ -1277,10 +1289,11 @@ class RWKV(MyModule):
             mlp_pred = torch.relu(kx @ mlpfc1) @ mlpfc2  # logits
             mlp_pred = torch.sigmoid(mlp_pred) 
             mlp_pred = (mlp_pred > thr).int()
+        time_measure['mlp_exec_end'] = time.time()
 
         # --- quant pred, n bit    
-        time_measure['quant_exec_start'] = time.time()
         quant_pred = None
+        time_measure['quant_exec_start'] = time.time()
         if quant_weight is not None:
             kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
             kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit).to(kx.device)
@@ -1292,6 +1305,8 @@ class RWKV(MyModule):
             percentile = torch.quantile(result, percent).item()
             quant_pred = (result > percentile).int()
 
+        time_measure['quant_exec_end'] = time.time()
+
         if False:
             quant_sparsity = 1-torch.sum(quant_pred > 0)/torch.numel(quant_pred)
             mlp_sparsity  = 1-torch.sum(mlp_pred > 0)/torch.numel(mlp_pred)
@@ -1300,9 +1315,8 @@ class RWKV(MyModule):
                 print(f"layer_id quant_sparsity mlp_sparsity ensemble_sparsity")
             print(f"{layer_id} {quant_sparsity} {mlp_sparsity} {ensemble_sparsity}")
 
-        time_measure['quant_exec_end'] = time.time()
 
-        time_measure['mlp_exec'] = time_measure['quant_exec_start'] - time_measure['mlp_exec_start']
+        time_measure['mlp_exec'] = time_measure['mlp_exec_end'] - time_measure['mlp_exec_start']
         time_measure['quant_exec'] = time_measure['quant_exec_end'] - time_measure['quant_exec_start']
 
         pred = None
@@ -1919,7 +1933,9 @@ class RWKV(MyModule):
     @MyFunction
     def att_seq_v5_8(self, x, sx, s, ln_w, ln_b, lx_w, lx_b, k_mix, v_mix, r_mix, g_mix, t_decay, t_first, 
                      kw1,kw2, vw1,vw2, rw1,rw2, gw1,gw2, 
-                     ow, kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry, gmx, grx, gmy, gry, omx, orx, omy, ory):
+                     ow, 
+                     kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry, gmx, grx, gmy, gry, 
+                     omx, orx, omy, ory):
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
         sx = torch.cat((sx.unsqueeze(0), xx[:-1,:]))
         kx = xx * k_mix + sx * (1 - k_mix)
@@ -2092,7 +2108,7 @@ class RWKV(MyModule):
         # vocab = w['head.weight'].shape[1]   # shape D,vocab
         vocab = self.vocab
         # logits = torch.full((vocab,), float("-inf"), device='cuda', dtype=x.dtype) 
-        logits = torch.full((vocab,), float("-inf"), device=x.device, dtype=x.dtype) 
+        logits = torch.full((vocab,), float("-inf"), dtype=x.dtype) 
         #logits = torch.zeros((vocab,), device='cuda', dtype=x.dtype) 
 
         t2 = time.time()
@@ -2101,8 +2117,7 @@ class RWKV(MyModule):
         # (done) scatter_known_time > proj_known_time (~1.5x-2x), to optimize
         #   idea: since the # of predicted CLS is likely small, we may bundle them in one tensor
         # (with padding), do projection & scatter in one go.
-        num_tokens=0
-        sum_known_logits_exp = torch.tensor(0.0).to(x.device)  # sum of exp(logits) for all "known" clusters
+        sum_known_logits_exp = torch.tensor(0.0, device="cpu")  # sum of exp(logits) for all "known" clusters
 
         proj_known_time = 0.0 
         scatter_known_time = 0.0
@@ -2118,11 +2133,11 @@ class RWKV(MyModule):
             tt0 = time.time()
 
             # x1 = x @ w[f'head_l2org.{cls}.weight'] 
-            x1 = x @ head_l2org_weight[cls]
+            x1 = (x @ head_l2org_weight[cls]).to("cpu")
             # WC: stabilize the exp(logits) by subtracting the max value
             # https://blester125.com/blog/softmax.html#:~:text=Subtracting%20the%20maximum%20from%20all,subsequent%20sum%20will%20never%20overflow.
-            exp_x1 = torch.exp(x1 - x1.max()).to(x.device)
-            sum_known_logits_exp += torch.sum(exp_x1).float().to(x.device)
+            exp_x1 = torch.exp(x1 - x1.max())
+            sum_known_logits_exp += torch.sum(exp_x1).float()
 
             tt1 = time.time()
 
@@ -2132,7 +2147,7 @@ class RWKV(MyModule):
             # idx = torch.tensor(self.clusters[cls], device='cuda')
             idx = self.clusters_tensor[cls]
 
-            num_tokens += idx.shape[0]
+            #num_tokens += idx.shape[0]
 
             # Collect indices and logits
             all_idx.append(idx)
@@ -2141,8 +2156,8 @@ class RWKV(MyModule):
             proj_known_time += (tt1-tt0)
 
         # Concatenate all indices and logits
-        all_idx = torch.cat(all_idx).to(x.device)
-        all_x1 = torch.cat(all_x1).to(x.device)
+        all_idx = torch.cat(all_idx)
+        all_x1 = torch.cat(all_x1)
 
         # Scatter in one shot
         logits.scatter_(dim=0, index=all_idx, src=all_x1)
@@ -2158,6 +2173,7 @@ class RWKV(MyModule):
             cls_log_time = 0.0
             # all "other clusters": pseudo logits 
             Q = sum_known_logits_exp                    
+            P = sum_known_probs = CLSPROBS.sum().to("cpu")
             for i in range(0, len(CLS_OTHER)):
                 tt0 = time.time()
 
@@ -2166,19 +2182,19 @@ class RWKV(MyModule):
 
                 # cls: cluster id, 
                 # self.clusters[cls] list of token_ids in this cls (as scatter idx
-                idx = self.clusters_tensor[cls].to(x.device)
+                idx = self.clusters_tensor[cls]
                 num_t = idx.shape[0]
 
                 tt1 = time.time()
 
                 # x1: pseudo logits over tokens inside cls, (as scatter src
                 # S_j: sum of exp logits for the cluster
-                S_j  = Q * (clsprob / CLSPROBS.sum())
-                vvv = ((S_j / num_t)).log().to(x.device)
+                S_j  = Q * (clsprob / P)
+                vvv = ((S_j / num_t)).log()
                 # x1 = vvv * torch.ones(num_t, device=x.device, dtype=x.dtype)
 
                 tt2 = time.time()
-                # idx: 1D tensor, src: 1D tensor                
+                # idx: 1D tensor, src: 1D tensor
                 # logits.scatter_(dim=0, index=idx, src=x1)
                 logits.index_fill_(dim=0, index=idx, value=vvv)
                 tt3 = time.time()
@@ -2226,9 +2242,7 @@ class RWKV(MyModule):
             # breakpoint()
 
         # update statistics
-        self.stat_runs += 1
         self.stat_loaded_cls += len(CLS)
-        self.stat_loaded_tokens += num_tokens
         
         # -- sanity check ---- ... expensive 
         if False: 
@@ -2376,6 +2390,7 @@ class RWKV(MyModule):
             time_measure['ffn_kx_kw'] = 0
             time_measure['ffn_vx_vw'] = 0
             time_measure['fwd_start'] = time.time()
+            num_tokens = 0
 
             # xzl: init state
             if state == None:
@@ -2406,8 +2421,15 @@ class RWKV(MyModule):
             # xzl: seq_mode=True for prompt encoding; =False for autoregression
             #   eval also uses seq_mode
             seq_mode = len(tokens) > 1
+            #self.lazy_emb = False
+            if self.lazy_emb:
+                if seq_mode:
+                    x = self.emb.get_embeddings(tokens)
+                else:
+                    x = self.emb.get_embedding(tokens[0])
+            else:
+                x = w['emb.weight'][tokens if seq_mode else tokens[0]] # xzl: 'x'-input
 
-            x = w['emb.weight'][tokens if seq_mode else tokens[0]] # xzl: 'x'-input
 
             ##### xzl: below- assemble & run layers (each layer)
             #  use custom cuda impl if available, otherwise fall back to torch
@@ -2645,10 +2667,14 @@ class RWKV(MyModule):
                         # kw, vw, rw, gw, 
                         kw1,kw2, vw1,vw2, rw1,rw2, gw1,gw2, # sans "diag"
                         ow,
-                        kmx, krx, kmy, kry,
-                        vmx, vrx, vmy, vry,
-                        rmx, rrx, rmy, rry,
-                        gmx, grx, gmy, gry,
+                        kmx1, krx1, kmy1, kry1,
+                        kmx2, krx2, kmy2, kry2,
+                        vmx1, vrx1, vmy1, vry1,
+                        vmx2, vrx2, vmy2, vry2,
+                        rmx1, rrx1, rmy1, rry1,
+                        rmx2, rrx2, rmy2, rry2,
+                        gmx1, grx1, gmy1, gry1,
+                        gmx2, grx2, gmy2, gry2,
                         omx, orx, omy, ory,
                         )
                 elif self.version in [5.9, 5.94, 5.95, 5.96]:
@@ -3256,7 +3282,7 @@ class RWKV(MyModule):
                     # update statistics
                     self.stat_runs += 1
                     self.stat_loaded_cls += len(CLS)
-                    self.stat_loaded_tokens += num_tokens
+                    #self.stat_loaded_tokens += num_tokens
                     
                     # -- sanity check ---- ... expensive 
                     if False: 
@@ -3356,13 +3382,18 @@ class RWKV(MyModule):
                     new_x = []
                     self.cached_orgx = x
                     for row in x:
-                        new_x.append(self._retrieve_value3_jit(row, self.head_l1_weight, self.head_l2org_weight))
+                        temp_x = self._retrieve_value3_jit(row, self.head_l1_weight, self.head_l2org_weight)
+                        new_x.append(temp_x)
+                        num_tokens += x.shape[0]
                     x = torch.stack(new_x)
                 else:
                     x = self._retrieve_value3_jit(x, self.head_l1_weight, self.head_l2org_weight)
+                    num_tokens += x.shape[0]
+                self.stat_loaded_tokens += num_tokens
 
             elif w['head.weight'].dtype != torch.uint8:  # original cls head
                 x = x @ w['head.weight']
+                num_tokens = x.shape[0]
             else:   # orig cls head, but int8
                 if seq_mode and full_output:                    
                     x = mm8_seq(x, w['head.weight'], w['head.weight_mx'], w['head.weight_rx'], w['head.weight_my'], w['head.weight_ry'])
@@ -3391,6 +3422,8 @@ class RWKV(MyModule):
             self.stat_time_ffn_kx_kw += time_measure["ffn_kx_kw"]
             self.stat_time_ffn_vx_vw += time_measure["ffn_vx_vw"]
             self.stat_time_cls += time_measure["cls_exec"]        
+            self.stat_runs += 1
+            self.stat_loaded_tokens += num_tokens
             # breakpoint()
 
             if self.sparse_outpath is not None:
@@ -3502,4 +3535,4 @@ class RWKV(MyModule):
         elif cutoff_idx>maxK:
             cutoff_idx=maxK
         return sorted_ids[:cutoff_idx], sorted_probs[:cutoff_idx], \
-            sorted_ids[cutoff_idx:], sorted_probs[cutoff_idx:],
+            sorted_ids[cutoff_idx:].to("cpu"), sorted_probs[cutoff_idx:].to("cpu"),

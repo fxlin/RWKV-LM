@@ -35,7 +35,7 @@ import os
 
 # official
 # model_path='/data/models/RWKV-5-World-0.1B-v1-20230803-ctx4096' # official, NB it's v1
-# model_path='/data/models/RWKV-5-World-0.4B-v2-20231113-ctx4096'
+# model_path='/data/models/pi-deployment/RWKV-5-World-0.4B-v2-20231113-ctx4096'
 
 # .1B 16x, deeply compressed 
 # model_path='/data/models/01b-pre-x59-16x-901'
@@ -53,7 +53,8 @@ import os
 # model_path='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-pretrain-x59/from-hpc/rwkv-976'
 # model_path='/data/models/pi-deployment/01b-pre-x52-1455'
 # model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
-model_path='/data/models/pi-deployment/01b-pre-x59-976'
+# model_path='/data/models/pi-deployment/01b-pre-x59-976'
+model_path='/data/models/pi-deployment/04b-tunefull-x58-562'
 
 # model_path='/data/models/pi-deployment/04b-pre-x59-2405'
 
@@ -92,8 +93,8 @@ if os.environ["RWKV_CUDA_ON"] == '1':
     strategy='cuda fp16'
     # strategy='cuda fp16i8',
 else:
-    # strategy='cpu fp16'
-    strategy='cpu fp16i8'
+    strategy='cpu fp16'
+    # strategy='cpu fp16i8'
 
 # use below to quantize model & save
 if False: 
@@ -178,7 +179,8 @@ x52     01b-pre-x52-1455        15.3
 x59     01b-pre-x59-976         10.5
         fp16i8 v3                  8.13                        
 
-04b    04b-pre-x59-2405        3.36 (not too bad
+04b official (x52)             6.62    
+    04b-pre-x59-2405        3.36 (not too bad
     fp16i8 v3                  3.0 (not too bad)
 
 1b5        OOM
