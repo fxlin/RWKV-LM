@@ -218,6 +218,7 @@ def mm8(x: torch.Tensor, w: torch.Tensor, mx: torch.Tensor, rx: torch.Tensor, my
     return mm8_seq(x, w, mx, rx, my, ry)
 
 # xzl: "the" matmul, dispatch to float and quant (for mm8 above). called by rwkv model below
+# = a@b
 def matmul(a, b, mx: Optional[torch.Tensor]=None, rx: Optional[torch.Tensor]=None, my: Optional[torch.Tensor]=None, ry: Optional[torch.Tensor]=None, output_dtype: Optional[torch.dtype]=None) -> torch.Tensor:
     if output_dtype is None:
         output_dtype = a.dtype
