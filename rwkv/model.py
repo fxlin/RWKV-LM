@@ -850,15 +850,22 @@ class RWKV(MyModule):
     @MyFunction
     def ffn_one_v5_8(self, x, sx, ln_w, ln_b, k_mix, r_mix, kw, vw, 
                      rw1, rw2, # sans rwdiag, 
-                     kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry):
+                     kmx, krx, kmy, kry, vmx, vrx, vmy, vry, 
+                     rmx1, rrx1, rmy1, rry1,
+                     rmx2, rrx2, rmy2, rry2,
+                    layer_id :int,       # xzl
+                    mlp_weights = None,     # TBD
+                    quant_weight = None,    # TBD
+                    time_measure = None,    # TBD            
+                    ):
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
         kx = xx * k_mix + sx * (1 - k_mix)
         rx = xx * r_mix + sx * (1 - r_mix)
 
         # r = torch.sigmoid(matmul(rx, rw, rmx, rrx, rmy, rry)) # orig
-        r = matmul(rx, rw1) 
+        r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         # r = torch.relu(r) ** 2    // no relu
-        r = matmul(r, rw2)
+        r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2)
         r = torch.sigmoid(r)
 
         vx = torch.relu(matmul(kx, kw, kmx, krx, kmy, kry)) ** 2
@@ -1204,16 +1211,24 @@ class RWKV(MyModule):
     @MyFunction
     def ffn_seq_v5_8(self, x, sx, ln_w, ln_b, k_mix, r_mix, kw, vw, 
                      rw1, rw2, # sans rwdiag, 
-                     kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry):
+                     kmx, krx, kmy, kry, 
+                     vmx, vrx, vmy, vry, 
+                     rmx1, rrx1, rmy1, rry1,
+                     rmx2, rrx2, rmy2, rry2,
+                     layer_id :int,      # xzl 
+                     mlp_weights = None,    # TBD
+                     quant_weight = None,   # TBD
+                     time_measure = None,   # TBD
+                     ):
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
         sx = torch.cat((sx.unsqueeze(0), xx[:-1,:]))
         kx = xx * k_mix + sx * (1 - k_mix)
         rx = xx * r_mix + sx * (1 - r_mix)
 
         # r = torch.sigmoid(matmul(rx, rw, rmx, rrx, rmy, rry)) # orig
-        r = matmul(rx, rw1) 
+        r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         # r = torch.relu(r) ** 2    # no relu
-        r = matmul(r, rw2)
+        r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2)
         r = torch.sigmoid(r)        
 
         vx = torch.relu(matmul(kx, kw, kmx, krx, kmy, kry)) ** 2
@@ -1815,7 +1830,16 @@ class RWKV(MyModule):
     @MyFunction
     def att_one_v5_8(self, x, sx, s, ln_w, ln_b, lx_w, lx_b, k_mix, v_mix, r_mix, g_mix, t_decay, t_first, 
                      kw1,kw2, vw1,vw2, rw1,rw2, gw1,gw2,    # ours 
-                     ow, kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry, gmx, grx, gmy, gry, omx, orx, omy, ory):        
+                     ow, 
+                     kmx1, krx1, kmy1, kry1, 
+                     kmx2, krx2, kmy2, kry2, 
+                     vmx1, vrx1, vmy1, vry1, 
+                     vmx2, vrx2, vmy2, vry2, 
+                     rmx1, rrx1, rmy1, rry1, 
+                     rmx2, rrx2, rmy2, rry2, 
+                     gmx1, grx1, gmy1, gry1, 
+                     gmx2, grx2, gmy2, gry2, 
+                     omx, orx, omy, ory):        
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
         kx = xx * k_mix + sx * (1 - k_mix)
         vx = xx * v_mix + sx * (1 - v_mix)
@@ -1826,27 +1850,27 @@ class RWKV(MyModule):
         N = x.shape[-1] // H
 
         # r = matmul(rx, rw, rmx, rrx, rmy, rry, output_dtype=torch.float32).view(H, 1, N)  # orig
-        r = matmul(rx, rw1) 
+        r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         # r = torch.relu(r) ** 2    # no relu
-        r = matmul(r, rw2, output_dtype=torch.float32)     
+        r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2, output_dtype=torch.float32)
         r = r.view(H,1,N)
 
         # k = matmul(kx, kw, kmx, krx, kmy, kry, output_dtype=torch.float32).view(H, N, 1) # orig
-        k = matmul(kx, kw1) 
+        k = matmul(kx, kw1, kmx1, krx1, kmy1, kry1) 
         # k = torch.relu(k) ** 2   # no relu
-        k = matmul(k, kw2, output_dtype=torch.float32)
+        k = matmul(k, kw2, kmx2, krx2, kmy2, kry2, output_dtype=torch.float32)
         k = k.view(H,N,1)
 
         # v = matmul(vx, vw, vmx, vrx, vmy, vry, output_dtype=torch.float32).view(H, 1, N) # orig
-        v = matmul(vx, vw1) 
+        v = matmul(vx, vw1, vmx1, vrx1, vmy1, vry1) 
         # v = torch.relu(v) ** 2   # no relu
-        v = matmul(v, vw2, output_dtype=torch.float32)     
+        v = matmul(v, vw2, vmx2, vrx2, vmy2, vry2, output_dtype=torch.float32)
         v = v.view(H,1,N)
 
         # g = F.silu(matmul(gx, gw, gmx, grx, gmy, gry))  @ orig
-        g = matmul(gx, gw1)
+        g = matmul(gx, gw1, gmx1, grx1, gmy1, gry1)
         # g = torch.relu(g) ** 2    # no relu
-        g = matmul(g, gw2) 
+        g = matmul(g, gw2, gmx2, grx2, gmy2, gry2)
         g = F.silu(g) 
         
         a = matmul(k, v)
@@ -1934,7 +1958,14 @@ class RWKV(MyModule):
     def att_seq_v5_8(self, x, sx, s, ln_w, ln_b, lx_w, lx_b, k_mix, v_mix, r_mix, g_mix, t_decay, t_first, 
                      kw1,kw2, vw1,vw2, rw1,rw2, gw1,gw2, 
                      ow, 
-                     kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry, gmx, grx, gmy, gry, 
+                     kmx1, krx1, kmy1, kry1,
+                     kmx2, krx2, kmy2, kry2,
+                     vmx1, vrx1, vmy1, vry1, 
+                     vmx2, vrx2, vmy2, vry2, 
+                     rmx1, rrx1, rmy1, rry1, 
+                     rmx2, rrx2, rmy2, rry2, 
+                     gmx1, grx1, gmy1, gry1, 
+                     gmx2, grx2, gmy2, gry2, 
                      omx, orx, omy, ory):
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
         sx = torch.cat((sx.unsqueeze(0), xx[:-1,:]))
@@ -1948,27 +1979,27 @@ class RWKV(MyModule):
         T = x.shape[0]
 
         # r = matmul(rx, rw, rmx, rrx, rmy, rry, output_dtype=torch.float32).view(T, H, N).transpose(0, 1) # orig
-        r = matmul(rx, rw1) 
+        r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         # r = torch.relu(r) ** 2        # no relu
-        r = matmul(r, rw2, output_dtype=torch.float32)     
+        r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2, output_dtype=torch.float32)
         r = r.view(T,H,N).transpose(0, 1)
 
         # k = matmul(kx, kw, kmx, krx, kmy, kry, output_dtype=torch.float32).view(T, H, N).permute(1, 2, 0) # orig
-        k = matmul(kx, kw1) 
+        k = matmul(kx, kw1, kmx1, krx1, kmy1, kry1) 
         # k = torch.relu(k) ** 2        # no relu
-        k = matmul(k, kw2, output_dtype=torch.float32)     
+        k = matmul(k, kw2, kmx2, krx2, kmy2, kry2, output_dtype=torch.float32)     
         k = k.view(T,H,N).permute(1, 2, 0)
                 
         # v = matmul(vx, vw, vmx, vrx, vmy, vry, output_dtype=torch.float32).view(T, H, N).transpose(0, 1) # orig
-        v = matmul(vx, vw1) 
+        v = matmul(vx, vw1, vmx1, vrx1, vmy1, vry1) 
         # v = torch.relu(v) ** 2        # no relu
-        v = matmul(v, vw2, output_dtype=torch.float32)     
+        v = matmul(v, vw2, vmx2, vrx2, vmy2, vry2, output_dtype=torch.float32)
         v = v.view(T,H,N).transpose(0, 1)
 
         # g = F.silu(matmul(gx, gw, gmx, grx, gmy, gry)) # orig
-        g = matmul(gx, gw1)
+        g = matmul(gx, gw1, gmx1, grx1, gmy1, gry1)
         # g = torch.relu(g) ** 2        # no relu
-        g = matmul(g, gw2) 
+        g = matmul(g, gw2, gmx2, grx2, gmy2, gry2)
         g = F.silu(g)
 
         out = torch.empty((T, H, N), dtype=r.dtype, device=r.device)
@@ -2850,7 +2881,6 @@ class RWKV(MyModule):
                         rmx1, rrx1, rmy1, rry1,
                         rmx2, rrx2, rmy2, rry2,
                         )
-
                 elif self.version in [5.8]:
                     x, state[offset] = FFN(
                         x, state[offset],
@@ -2861,8 +2891,10 @@ class RWKV(MyModule):
                         rw1, rw2, # sans diag 
                         kmx, krx, kmy, kry,
                         vmx, vrx, vmy, vry,
-                        rmx, rrx, rmy, rry,                    
-                        )                    
+                        rmx1, rrx1, rmy1, rry1,
+                        rmx2, rrx2, rmy2, rry2,
+                        i   # xzl, layer_id                        
+                        )
                 elif self.version < 6.0:
                     x, state[offset] = FFN(
                         x, state[offset],
