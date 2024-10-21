@@ -980,7 +980,8 @@ class RWKV(MyModule):
         r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         r = torch.relu(r) ** 2
         r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2)
-        r += rx @ torch.diag(rwdiag)   # xzl: should use matmul??
+        # r += rx @ torch.diag(rwdiag)
+        r += rx * rwdiag # faster than above ...
         r = torch.sigmoid(r)
         mm_end_t = time.time()
         time_measure['ffn_rx_rw'] += mm_end_t - mm_start_t
@@ -1289,7 +1290,8 @@ class RWKV(MyModule):
         r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         r = torch.relu(r) ** 2
         r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2)
-        r += rx @ torch.diag(rwdiag)   # xzl: should use matmul??
+        # r += rx @ torch.diag(rwdiag)
+        r += rx * rwdiag # xzl: faster than above...
         r = torch.sigmoid(r)
         mm_end_t = time.time()
         time_measure['ffn_rx_rw'] += mm_end_t - mm_start_t
@@ -1791,28 +1793,32 @@ class RWKV(MyModule):
         r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         r = torch.relu(r) ** 2
         r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2, output_dtype=torch.float32)     
-        r += rx @ torch.diag(rwdiag)   # xzl: should use matmul??
+        # r += rx @ torch.diag(rwdiag)   
+        r += rx * rwdiag        # xzl: faster than above...
         r = r.view(H,1,N)
 
         # k = matmul(kx, kw, kmx, krx, kmy, kry, output_dtype=torch.float32).view(H, N, 1) # orig
         k = matmul(kx, kw1, kmx1, krx1, kmy1, kry1) 
         k = torch.relu(k) ** 2
         k = matmul(k, kw2, kmx2, krx2, kmy2, kry2, output_dtype=torch.float32)
-        k += kx @ torch.diag(kwdiag)
+        # k += kx @ torch.diag(kwdiag)
+        k += kx * kwdiag  # faster than above...
         k = k.view(H,N,1)
 
         # v = matmul(vx, vw, vmx, vrx, vmy, vry, output_dtype=torch.float32).view(H, 1, N) # orig
         v = matmul(vx, vw1, vmx1, vrx1, vmy1, vry1) 
         v = torch.relu(v) ** 2
         v = matmul(v, vw2, vmx2, vrx2, vmy2, vry2, output_dtype=torch.float32)     
-        v += vx @ torch.diag(vwdiag)
+        # v += vx @ torch.diag(vwdiag)
+        v += vx * vwdiag # faster than above...
         v = v.view(H,1,N)
 
         # g = F.silu(matmul(gx, gw, gmx, grx, gmy, gry))  @ orig
         g = matmul(gx, gw1, gmx1, grx1, gmy1, gry1)
         g = torch.relu(g) ** 2
         g = matmul(g, gw2, gmx2, grx2, gmy2, gry2) 
-        g += gx @ torch.diag(gwdiag)
+        # g += gx @ torch.diag(gwdiag)
+        g += gx * gwdiag  # faster than above...
         g = F.silu(g) 
         
         a = matmul(k, v)
@@ -1913,28 +1919,32 @@ class RWKV(MyModule):
         r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         r = torch.relu(r) ** 2
         r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2, output_dtype=torch.float32)     
-        r += rx @ torch.diag(rwdiag)   # xzl: should use matmul??
+        # r += rx @ torch.diag(rwdiag)
+        r += rx * rwdiag   # faster than above...
         r = r.view(T,H,N).transpose(0, 1)
 
         # k = matmul(kx, kw, kmx, krx, kmy, kry, output_dtype=torch.float32).view(T, H, N).permute(1, 2, 0) # orig
         k = matmul(kx, kw1, kmx1, krx1, kmy1, kry1) 
         k = torch.relu(k) ** 2
         k = matmul(k, kw2, kmx2, krx2, kmy2, kry2, output_dtype=torch.float32)     
-        k += kx @ torch.diag(kwdiag)
+        # k += kx @ torch.diag(kwdiag)
+        k += kx * kwdiag  # faster than above...
         k = k.view(T,H,N).permute(1, 2, 0)
                 
         # v = matmul(vx, vw, vmx, vrx, vmy, vry, output_dtype=torch.float32).view(T, H, N).transpose(0, 1) # orig
         v = matmul(vx, vw1, vmx1, vrx1, vmy1, vry1) 
         v = torch.relu(v) ** 2
         v = matmul(v, vw2, vmx2, vrx2, vmy2, vry2, output_dtype=torch.float32)     
-        v += vx @ torch.diag(vwdiag)
+        # v += vx @ torch.diag(vwdiag)
+        v += vx * vwdiag  # faster than above...
         v = v.view(T,H,N).transpose(0, 1)
 
         # g = F.silu(matmul(gx, gw, gmx, grx, gmy, gry)) # orig
         g = matmul(gx, gw1, gmx1, grx1, gmy1, gry1)
         g = torch.relu(g) ** 2
         g = matmul(g, gw2, gmx2, grx2, gmy2, gry2)
-        g += gx @ torch.diag(gwdiag)
+        # g += gx @ torch.diag(gwdiag)
+        g += gx * gwdiag  # faster than above...
         g = F.silu(g)
 
         out = torch.empty((T, H, N), dtype=r.dtype, device=r.device)
