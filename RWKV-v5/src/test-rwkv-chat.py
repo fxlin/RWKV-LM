@@ -55,12 +55,12 @@ import os
 # model_path='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-pretrain-x59/from-hpc/rwkv-976'
 
 # model_path='/data/models/pi-deployment/01b-pre-x52-1455'
-model_path='/data/models/pi-deployment/01b-pre-x58-512'
+# model_path='/data/models/pi-deployment/01b-pre-x58-512'
 
 # model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
 # model_path='/data/models/pi-deployment/01b-pre-x59-976'
 # model_path='/data/models/pi-deployment/04b-tunefull-x58-562'
-# model_path='/data/models/pi-deployment/04b-pre-x59-2405'
+model_path='/data/models/pi-deployment/04b-pre-x59-2405'
 
 # model_path='/data/models/rwkv-04b-pre-x59-860'
 
@@ -185,12 +185,12 @@ x52     01b-pre-x52-1455        15.3
     fp16i8 v4                       ~10 tok/sec  
             (even for M=N=768, 2t is still benefitical; better than 1t)
                                  
-x59     01b-pre-x59-976         10.5
-        fp16i8 v3                  8.13                        
+x59     01b-pre-x59-976         15.02 (old: 10.5
+        fp16i8 v3                  (old: 8.13                        
 
 04b official (x52)             6.62    
-    04b-pre-x59-2405        3.36 (not too bad
-    fp16i8 v3                  3.0 (not too bad)
+    04b-pre-x59-2405           6.86         (old -- 3.36 (not too bad
+    fp16i8 v3                           (old -- 3.0 (not too bad)
 
 1b5        OOM
 
