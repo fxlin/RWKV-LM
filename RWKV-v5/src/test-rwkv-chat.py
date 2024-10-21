@@ -35,7 +35,7 @@ import os
 
 # official
 # model_path='/data/models/RWKV-5-World-0.1B-v1-20230803-ctx4096' # official, NB it's v1
-# model_path='/data/models/pi-deployment/RWKV-5-World-0.4B-v2-20231113-ctx4096'
+model_path='/data/models/pi-deployment/RWKV-5-World-0.4B-v2-20231113-ctx4096'
 
 # .1B 16x, deeply compressed 
 # model_path='/data/models/01b-pre-x59-16x-901'
@@ -54,7 +54,7 @@ import os
 # model_path='/data/models/pi-deployment/01b-pre-x52-1455'
 # model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
 # model_path='/data/models/pi-deployment/01b-pre-x59-976'
-model_path='/data/models/pi-deployment/04b-tunefull-x58-562'
+# model_path='/data/models/pi-deployment/04b-tunefull-x58-562'
 
 # model_path='/data/models/pi-deployment/04b-pre-x59-2405'
 
