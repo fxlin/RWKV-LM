@@ -17,6 +17,19 @@ def is_raspberry_pi():
         # Not running on Linux or /proc/cpuinfo doesn't exist
         return None
 
+def is_amd_cpu():
+    try:
+        with open('/proc/cpuinfo', 'r') as f:
+            cpuinfo = f.read().lower()
+        
+        # Check if the CPU is an AMD processor
+        if 'amd' in cpuinfo:
+            return True
+    except FileNotFoundError:
+        # Not running on Linux or /proc/cpuinfo doesn't exist
+        return False
+    
+    return False
 
 def map_revision_to_version(revision):
     # Simplified mapping for major versions based on revision codes

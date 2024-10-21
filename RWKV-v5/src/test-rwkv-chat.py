@@ -27,6 +27,8 @@ if os.environ.get('RWKV_CUDA_ON') != '0':
 
 from rwkv.model import RWKV
 from rwkv.utils import PIPELINE, PIPELINE_ARGS
+from rwkv.arm_plat import is_amd_cpu
+
 import os
 
 
@@ -35,7 +37,7 @@ import os
 
 # official
 # model_path='/data/models/RWKV-5-World-0.1B-v1-20230803-ctx4096' # official, NB it's v1
-model_path='/data/models/pi-deployment/RWKV-5-World-0.4B-v2-20231113-ctx4096'
+# model_path='/data/models/pi-deployment/RWKV-5-World-0.4B-v2-20231113-ctx4096'
 
 # .1B 16x, deeply compressed 
 # model_path='/data/models/01b-pre-x59-16x-901'
@@ -51,12 +53,16 @@ model_path='/data/models/pi-deployment/RWKV-5-World-0.4B-v2-20231113-ctx4096'
 
 # model_path='/data/models/0.1b-pre-x59-16x-1451'
 # model_path='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-pretrain-x59/from-hpc/rwkv-976'
+
 # model_path='/data/models/pi-deployment/01b-pre-x52-1455'
+model_path='/data/models/pi-deployment/01b-pre-x58-512'
+
 # model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
 # model_path='/data/models/pi-deployment/01b-pre-x59-976'
 # model_path='/data/models/pi-deployment/04b-tunefull-x58-562'
-
 # model_path='/data/models/pi-deployment/04b-pre-x59-2405'
+
+# model_path='/data/models/rwkv-04b-pre-x59-860'
 
 # model_path='/data/models/pi-deployment/1b5-pre-x59-929'
 # model_path='/data/models/pi-deployment/01b-pre-x59-CLS-TEST'
@@ -93,7 +99,10 @@ if os.environ["RWKV_CUDA_ON"] == '1':
     strategy='cuda fp16'
     # strategy='cuda fp16i8',
 else:
-    strategy='cpu fp16'
+    if is_amd_cpu():
+        strategy='cpu fp32'  # amd cpu lacks hard fp16...
+    else:
+        strategy='cpu fp16'
     # strategy='cpu fp16i8'
 
 # use below to quantize model & save
@@ -194,4 +203,19 @@ x59     01b-pre-x59-976         3.1
     fp16i8                      .45 (very slow)
 
     1b5                          .26 (slow)
+
+--------------
+xsel02, amd cpu (only support hw fp32, fp16 VERY slow
+
+FP32 
+(NB: this is only svd. no cls, no sparsification
+                                 tok/sec
+01b official (x52)             
+
+
+                               
+04b official (x52)              44.72
+    04b-tunefull-x58-562        43.58
+    04b-pre-x59-2405            31.22 
+    
 '''
