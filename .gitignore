@@ -155,3 +155,4 @@ RWKV-v5/src/sparse-test/sgemv_example
 RWKV-v5/src/sparse-test/test-mmap-overlay
 rwkv/neon/build-err.txt
 rwkv/neon/build-log.txt
+rwkv/neon/matmul_1bit_fp16

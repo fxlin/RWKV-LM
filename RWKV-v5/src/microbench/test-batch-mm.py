@@ -4,11 +4,13 @@ import time
 '''
 purpose: to see if we have any speedup by using batched matmul, to recover from decomposed att/ffn weights...
 conclusion: minor speedup, but not much (esp when D is larger) 
+
+also cf test-batch-gemm.py, which shows higher benefit??
 '''
 
 # Define the dimensions       M is actually D (feature dim)
-# M, N = 1024, 1024//8
-M, N = 2048, 2048//8
+M, N = 1024, 1024//8
+# M, N = 2048, 2048//8
 
 # Generate random tensors
 tensors_a = [torch.randn(M, N) for _ in range(5)]
