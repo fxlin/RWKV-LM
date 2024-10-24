@@ -46,6 +46,7 @@ def map_revision_to_version(revision):
         '9020e0': '4b,8g',      # Pi 4 Model B 8GB
         'c04170': '5,4g',
         'c03140': '5',        # Pi 5
+        'd04170': '5,8g',     # Pi 5 8GB, model b rev 1.0
     }
 
     # Return the board version or None if unknown

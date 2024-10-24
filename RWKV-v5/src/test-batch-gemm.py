@@ -6,8 +6,8 @@ import time
 device = 'cpu'
 
 # Define input tensors on the appropriate device
-M = 1_000
-N = 1_000
+M = 1024
+N = 256
 
 tensor10 = torch.rand(M, N, device=device)
 tensor11 = torch.rand(N, M, device=device)
@@ -26,6 +26,7 @@ result3 = torch.mm(tensor30, tensor31)
 individual_time = time.time() - start_time
 
 # Measure time for batched matrix multiplication
+# NB: stack itself will take time 
 batched_tensors1 = torch.stack([tensor10, tensor20, tensor30])
 batched_tensors2 = torch.stack([tensor11, tensor21, tensor31])
 
@@ -35,3 +36,12 @@ batched_time = time.time() - start_time
 
 print(f"Time for individual matrix multiplications: {individual_time:.6f} seconds")
 print(f"Time for batched matrix multiplication: {batched_time:.6f} seconds")
+
+'''
+# rpi5
+M = 1024
+N = 256
+Time for individual matrix multiplications: 0.056667 seconds
+Time for batched matrix multiplication: 0.028265 seconds
+
+'''
