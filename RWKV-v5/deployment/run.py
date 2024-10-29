@@ -13,10 +13,10 @@ from rwkv.model import RWKV
 from rwkv.utils import PIPELINE, PIPELINE_ARGS
 
 models = [
-        'models/official-0.1b',
+        #'models/official-0.1b',
         #'models/official-0.4b',
         #'models/official-1.5b'
-        #'models/01b-x59',
+        'models/01b-x59',
         #'models/04b-x59'
         ]
 cls_models = [
@@ -70,7 +70,7 @@ if __name__ == "__main__":
             pipeline.generate(ctx, token_count=token_limit, args=args, callback=my_print)
         total_fwd_t = (model.stat_time_fwd - model.stat_time_quant) / iterations
         total_att_t = model.stat_time_att / iterations
-        total_ffn_t = model.stat_time_ffn / iterations
+        total_ffn_t = (model.stat_time_ffn - model.stat_time_quant) / iterations
         total_cls_t = model.stat_time_cls / iterations
 
         if isverbose: 
