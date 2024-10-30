@@ -1,0 +1,39 @@
+#deployment 
+
+cd ~/workspace-waveshare/e-Paper/RaspberryPi_JetsonNano/python
+pip install -e . 
+pip install spidev
+pip install gpiozero
+pip install lgpio
+
+https://www.waveshare.com/wiki/2.13inch_Touch_e-Paper_HAT_Manual#python
+
+
+python3 -m venv myenv
+pip install numpy
+pip install spidev
+pip install gpiozero
+
+# partial, focus on touch features
+python3 python/examples/TP2in13_V4_test.py
+
+
+# better ex, from ePaper repo
+https://github.com/waveshareteam/e-Paper/blob/master/RaspberryPi_JetsonNano/python/examples/epd_2in13_V4_test.py
+
+sudo python3 epd_2in13_V4_test.py
+
+
+
+
+displayPartBaseImage(buffer):
+
+This function is used to display the base image for partial updates. It takes a
+buffer (usually created using epd.getbuffer()) that contains the initial content
+of the image you want to display
+
+displayPartial(buffer):
+used to update only a part of the display instead of refreshing the entire screen, which
+
+
+

@@ -60,11 +60,11 @@ import os
 # model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
 # model_path='/data/models/pi-deployment/01b-pre-x59-976'
 # model_path='/data/models/pi-deployment/04b-tunefull-x58-562'
-model_path='/data/models/pi-deployment/04b-pre-x59-2405'
+# model_path='/data/models/pi-deployment/04b-pre-x59-2405'
 
 # model_path='/data/models/rwkv-04b-pre-x59-860'
 
-# model_path='/data/models/pi-deployment/1b5-pre-x59-929'
+model_path='/data/models/pi-deployment/1b5-pre-x59-929'
 # model_path='/data/models/pi-deployment/01b-pre-x59-CLS-TEST'
 
 # #Only head.l1 tuned. KL loss (good
