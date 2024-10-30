@@ -195,7 +195,8 @@ x59     01b-pre-x59-976         15.02 (old: 10.5
 1b5        OOM
 
 --------------
-rpi4  (only support fp32 in neon)
+rpi4  (BCM2711, quad Cortex-A72, 1.5GHz, 8GB)
+(only support fp32 in neon)
                                 tok/sec
 x52     01b-pre-x52-1455        5.1      
     fp16i8                       .4 (very slow)
@@ -203,6 +204,17 @@ x59     01b-pre-x59-976         3.1
     fp16i8                      .45 (very slow)
 
     1b5                          .26 (slow)
+
+--------------
+orange pi zero2w (Allwinner H618; quad CortexA53, 1.5GHz; 4GB DRAM)
+                        tok/sec
+01b-pre-x52-1455        4.96
+01b-pre-x59-976         4.72
+04b-tunefull-x58-562    2.42    
+04b-pre-x59-860         2.30         
+
+(naked cpu temp reached ~70C)
+board level power: 0.43A@5.25v
 
 --------------
 xsel02, amd cpu (only support hw fp32, fp16 VERY slow

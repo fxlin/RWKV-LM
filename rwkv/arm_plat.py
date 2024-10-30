@@ -65,4 +65,17 @@ def is_odroid():
         # /proc/cpuinfo might not exist on non-Linux systems
         return False
     return False
+
+def is_orangepi(): 
+    try:
+        with open("/proc/device-tree/model", "r") as f:
+            cpuinfo = f.read().lower()
+        if "orangepi" in cpuinfo:
+            if "zero2" in cpuinfo:
+                return "zero2w"
+            return "orangepi"  # generic??
+    except FileNotFoundError:
+        # /proc/cpuinfo might not exist on non-Linux systems
+        return None
+    return None
     

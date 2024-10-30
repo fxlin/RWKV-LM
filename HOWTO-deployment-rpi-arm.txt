@@ -9,6 +9,13 @@ mkdir ~/workspace-rwkv
 cd ~/workspace-rwkv
 git clone https://github.com/fxlin/RWKV-LM.git
 
+(optional: mDNS; or change in raspi-config, orangepi-config)
+sudo apt install avahi-daemon -y
+sudo systemctl enable avahi-daemon
+sudo systemctl start avahi-daemon
+
+(optional: s-tui; for better monitoring. otherwise htop is ok)
+sudo apt install s-tui
 
 sudo apt update
 sudo apt install -y python3-pip python3-venv 
@@ -16,6 +23,7 @@ sudo apt install -y ninja-build        # only needed for CUDA?
 
 cd ~/workspace-rwkv
 python3 -m venv myenv
+source myenv/bin/activate
 # make sure path is right
 which pip
 which python3
