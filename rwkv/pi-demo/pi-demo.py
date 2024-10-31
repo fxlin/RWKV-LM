@@ -47,10 +47,10 @@ class EInkDisplay:
 
         # text area
         self.xmax = self.xres
-        self.ymax = self.yres - 20  # Leave some space for the menu
+        self.ymax = self.yres - 30  # Leave some space for the menu
 
         # text area margin, to the boundary 
-        self.margin = 10 # px 
+        self.margin = 5 # px 
 
         # Set up fonts
         self.font_text = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), 15)
@@ -70,10 +70,16 @@ class EInkDisplay:
         self.x_position = self.margin
 
     def clear_text_area(self, update=False):
-        # Create the base image with the title
-        self.base_image = Image.new('1', (self.epd.height, self.epd.width), 255)  # 1-bit image (black and white)
-        self.base_draw = ImageDraw.Draw(self.base_image)
+        # blank "base image" (background)
+        # self.base_image = Image.new('1', (self.epd.height, self.epd.width), 255)  # 1-bit image (black and white)
+        # self.base_draw = ImageDraw.Draw(self.base_image)
         # self.base_draw.text((10, 10), "Title", font=self.font_title, fill=0)  # Draw the title at the top
+
+        # image as background, the image file orientation will affect the coordinate system
+        self.base_image = Image.open(os.path.join(picdir, "2in13/Photo_2.bmp")).rotate(-90, expand=True)
+
+        self.base_draw = ImageDraw.Draw(self.base_image)
+        # self.base_image.paste(newimage, (0, 0))
 
         # Display the base image 
         #   this is a "full" update  -- erase whole screen 
@@ -146,12 +152,13 @@ class EInkDisplay:
         need_upate = False
 
         # text_width = self.font_text.getlength(token + " ")
+        _, _, text_width_nospace, _ = self.font_text.getbbox(token)
         _, _, text_width, _ = self.font_text.getbbox(token + " ")
 
-        if self.x_position + text_width > self.xmax:
+        if self.x_position + text_width_nospace > self.xmax:
             self.y_position += self.row_height
-            self.x_position = 10
-            need_upate = True
+            self.x_position = self.margin
+            need_upate = True       # a new line starts, refresh
 
         if self.y_position + self.text_height > self.ymax:
             self.clear_text_area()
