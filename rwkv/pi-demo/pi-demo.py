@@ -33,12 +33,55 @@ if os.environ.get('RWKV_CUDA_ON') != '0':
 
 ###########
 # epaper display (epd)
+# 2in13_V4, 250x122
+# https://www.waveshare.com/wiki/2.13inch_Touch_e-Paper_HAT_Manual
 import logging
 from waveshare_epd import epd2in13_V4
 from PIL import Image,ImageDraw,ImageFont
 
 class EInkDisplay:
     def __init__(self, picdir):
+        # https://www.waveshare.com/wiki/2.13inch_Touch_e-Paper_HAT_Manual
+        self.xres = 250
+        self.yres = 122 
+
+        # text area
+        self.xmax = self.xres
+        self.ymax = self.yres - 20  # Leave some space for the menu
+
+        # text area margin, to the boundary 
+        self.margin = 10 # px 
+
+        # Set up fonts
+        self.font_text = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), 15)
+        self.font_title = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), 24)
+
+        # calculate row height ... 1.5x of text height
+        left, top, right, bottom,  = self.font_text.getbbox("A")
+        self.text_height = bottom - top
+        self.row_height = self.text_height * 3 / 2
+
+        self.hard_reset()
+        self.clear_text_area(True)
+        self.reset_position()
+
+    def reset_position(self):
+        self.y_position = self.margin
+        self.x_position = self.margin
+
+    def clear_text_area(self, update=False):
+        # Create the base image with the title
+        self.base_image = Image.new('1', (self.epd.height, self.epd.width), 255)  # 1-bit image (black and white)
+        self.base_draw = ImageDraw.Draw(self.base_image)
+        # self.base_draw.text((10, 10), "Title", font=self.font_title, fill=0)  # Draw the title at the top
+
+        # Display the base image 
+        #   this is a "full" update  -- erase whole screen 
+        if update:
+            buffer = self.epd.getbuffer(self.base_image)
+            self.epd.displayPartBaseImage(buffer)        
+
+    def hard_reset(self):
         # Initialize the e-ink display
         self.epd = epd2in13_V4.EPD()
         self.epd.init()
@@ -49,35 +92,47 @@ class EInkDisplay:
         end_time = time.time()  # End measuring time
         print(f"Clr time: {end_time - start_time:.4f} seconds")
 
-        # Set up fonts
-        self.font_text = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), 15)
-        self.font_title = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), 24)
+    def print_token1(self, token):
+        # preprocess... 
+        token = token.replace('\n\n', '■')
+        
+        need_upate = False
 
-        left, top, right, bottom,  = self.font_text.getbbox("A")
-        self.text_height = bottom - top
-        self.row_height = self.text_height * 5 / 4 
+        # text_width = self.font_text.getlength(token + " ")
+        _, _, text_width, _ = self.font_text.getbbox(token + " ")
 
-        # Create the base image with the title
-        self.base_image = Image.new('1', (self.epd.height, self.epd.width), 255)  # 1-bit image (black and white)
-        self.base_draw = ImageDraw.Draw(self.base_image)
-        self.base_draw.text((10, 10), "Title", font=self.font_title, fill=0)  # Draw the title at the top
+        if self.x_position + text_width > self.xmax:
+            self.y_position += self.row_height
+            self.x_position = 10
+            need_upate = True
 
-        # Display the base image
-        buffer = self.epd.getbuffer(self.base_image)
-        self.epd.displayPartBaseImage(buffer)
+        if self.y_position + self.text_height > self.ymax:
+            self.reset_position()
+            # Shift the contents of the base_image up by row_height
+            shifted_image = self.base_image.crop((0, self.row_height, self.epd.height, self.epd.width))
+            self.base_image.paste(shifted_image, (0, 0))
+            # Fill the region of the bottom row with white
+            self.base_draw.rectangle((0, self.epd.width - self.row_height, self.epd.height, self.epd.width), fill=255)
+            self.base_draw = ImageDraw.Draw(self.base_image)
+            self.base_draw.text((10, 10), "Title", font=self.font_title, fill=0)
+            need_upate = True
 
-        # Initialize positions
-        self.y_position = 40
-        self.x_position = 10
+        # Draw the token on the base image
+        self.base_draw.text((self.x_position, self.y_position), token, font=self.font_text, fill=0)
 
-        # https://www.waveshare.com/wiki/2.13inch_Touch_e-Paper_HAT_Manual
-        self.xmax = 250
-        self.ymax = 122 
+        # Update the x_position for the next word
+        self.x_position += text_width
 
-    def reset_position(self):
-        self.y_position = 40
-        self.x_position = 10
+        if need_upate:
+            # Update the e-ink display with the new token using partial update
+            # start_time = time.time()  # Start measuring time
+            # takes ~0.6 sec...
+            buffer = self.epd.getbuffer(self.base_image)
+            self.epd.displayPartial(buffer)
+            # end_time = time.time()  # End measuring time
+            # print(f"Token display time: {end_time - start_time:.4f} seconds")
 
+    # print token, update per line (roughly)
     def print_token(self, token):
         # if "\n" in token:
         #     breakpoint()
@@ -87,6 +142,8 @@ class EInkDisplay:
 
         # preprocess... 
         token = token.replace('\n\n', '■')
+        
+        need_upate = False
 
         # text_width = self.font_text.getlength(token + " ")
         _, _, text_width, _ = self.font_text.getbbox(token + " ")
@@ -94,28 +151,27 @@ class EInkDisplay:
         if self.x_position + text_width > self.xmax:
             self.y_position += self.row_height
             self.x_position = 10
+            need_upate = True
 
         if self.y_position + self.text_height > self.ymax:
+            self.clear_text_area()
             self.reset_position()
-            # self.epd.Clear(0xFF)
-            self.base_image = Image.new('1', (self.epd.height, self.epd.width), 255)  # clear the frme 
-            self.base_draw = ImageDraw.Draw(self.base_image)
-            self.base_draw.text((10, 10), "Title", font=self.font_title, fill=0)
+            need_upate = True
 
         # Draw the token on the base image
         self.base_draw.text((self.x_position, self.y_position), token, font=self.font_text, fill=0)
 
-        # Update the e-ink display with the new token using partial update
-        # start_time = time.time()  # Start measuring time
-        # takes ~0.6 sec...
-        buffer = self.epd.getbuffer(self.base_image)
-        self.epd.displayPartial(buffer)
-        # end_time = time.time()  # End measuring time
-        # print(f"Token display time: {end_time - start_time:.4f} seconds")
-
         # Update the x_position for the next word
         self.x_position += text_width
 
+        if need_upate:
+            # Update the e-ink display with the new token using partial update
+            # start_time = time.time()  # Start measuring time
+            # takes ~0.6 sec...
+            buffer = self.epd.getbuffer(self.base_image)
+            self.epd.displayPartial(buffer)
+            # end_time = time.time()  # End measuring time
+            # print(f"Token display time: {end_time - start_time:.4f} seconds")
 
 picdir = './pic'  
 eink_display = EInkDisplay(picdir)
