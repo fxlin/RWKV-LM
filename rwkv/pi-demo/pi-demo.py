@@ -108,19 +108,20 @@ class EInkDisplay:
         _, _, text_width, _ = self.font_text.getbbox(token + " ")
 
         if self.x_position + text_width > self.xmax:
+            self.x_position = self.margin
             self.y_position += self.row_height
-            self.x_position = 10
             need_upate = True
 
-        if self.y_position + self.text_height > self.ymax:
-            self.reset_position()
+        if self.y_position + self.text_height > self.ymax:    # will draw out of boundary
+            # self.reset_position()
+            self.x_position = self.margin   
+            self.y_position -= self.row_height
             # Shift the contents of the base_image up by row_height
-            shifted_image = self.base_image.crop((0, self.row_height, self.epd.height, self.epd.width))
+            shifted_image = self.base_image.crop((0, self.row_height, self.xmax, self.ymax))
             self.base_image.paste(shifted_image, (0, 0))
             # Fill the region of the bottom row with white
-            self.base_draw.rectangle((0, self.epd.width - self.row_height, self.epd.height, self.epd.width), fill=255)
+            self.base_draw.rectangle((0, self.ymax - self.row_height, self.xmax, self.ymax), fill=255)
             self.base_draw = ImageDraw.Draw(self.base_image)
-            self.base_draw.text((10, 10), "Title", font=self.font_title, fill=0)
             need_upate = True
 
         # Draw the token on the base image
@@ -128,6 +129,8 @@ class EInkDisplay:
 
         # Update the x_position for the next word
         self.x_position += text_width
+
+        print("xpos:", self.x_position, "ypos:", self.y_position)
 
         if need_upate:
             # Update the e-ink display with the new token using partial update
@@ -188,7 +191,8 @@ text = '''
 In the heart of a bustling city lies a quaint little café, hidden away from the busy streets and towering skyscrapers. The café, named "The Hidden Petal," has an atmosphere that radiates warmth and nostalgia, reminiscent of a time when life moved more slowly and people lingered over their coffee without a care in the world. The walls are adorned with vintage photographs, faded floral wallpaper, and shelves lined with books of all sorts, inviting patrons to stay and lose themselves in their pages. Small wooden tables are arranged with a view of the large window, which frames a charming garden filled with colorful flowers and gentle vines. The aroma of freshly baked croissants, ground coffee beans, and the distant sound of soft jazz music fills the air, creating an ambiance that makes one want to curl up with a book and forget the passage of time. The patrons, a mix of regulars and curious newcomers, seem to speak in hushed tones, as if not wanting to disturb the delicate tranquility of the place. Here, it feels as if the hustle and hurry of the world are miles away, and for a moment, time stands still, allowing one to simply be
 '''
 for token in text.split():
-    eink_display.print_token(token)
+    # eink_display.print_token(token)
+    eink_display.print_token1(token)
     # no delay
 sys.exit(0)
 ###### 
