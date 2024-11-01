@@ -15,6 +15,7 @@ fi
 RUNS=(
     # "04b-pre-x59"      # pretty much done
     # "04b-pre-x59-16x"
+    "04b-tunefull-x58"
     "1b5-pre-x59"
     "1b5-tunefull-x58"
     "3b-pre-x52"
