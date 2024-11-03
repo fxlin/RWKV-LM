@@ -199,10 +199,11 @@ class EInkDisplay:
                 self.display_condition.notify()
         '''
 
-    # scroll_offset: pixel 
+    # scroll_offset: pixel, if <0, will scroll to 0  
     def scroll_view(self, scroll_offset):
         # Set the new scroll offset
         self.scroll_offset = max(0, min(scroll_offset, self.text_image_height - self.ymax))
+        # print(f"scroll_view got {scroll_offset}, set offset to: {self.scroll_offset}")
         # Update the base image by cropping the relevant part of the text image
         self.update_viewport(self.scroll_offset)
 
@@ -268,15 +269,15 @@ class EInkDisplay:
                 buffer_to_display = self.display_buffer
                 self.display_buffer = None
 
-            print("render thr: displaying buffer...", end="")
+            # print("render thr: displaying buffer...", end="")
             start_time = time.time()  # Start measuring time
             # Update the e-ink display with the new buffer using partial update
             # creates a byte array buffer that the e-ink driver can use to perform the partial update on the display
             buffer = self.epd.getbuffer(buffer_to_display)
             # self.epd.displayPartial(buffer)   # this is async in newer lib 
             self.epd.displayPartial_Wait(buffer)
-            end_time = time.time()  # End measuring time
-            print(f": {end_time - start_time:.2f} seconds")
+            # end_time = time.time()  # End measuring time
+            # print(f": {end_time - start_time:.2f} seconds")
 
     def stop(self):
         # Stop the display update thread
@@ -309,6 +310,24 @@ def pthread_irq() :
             GT_Dev.Touch = 0
     print("thread:exit")
 
+
+# transpose the touch x-y to be same as the display x-y
+def transpose_touch_inplace(dev, xres):
+    dev.X, dev.Y = dev.Y, dev.X         # transpose
+    dev.X = [xres - x for x in dev.X]   # mirror
+
+def transpose_touch(GT_dev, xres):
+    tr = gt1151.GT_Development()
+    tr.Touch = GT_dev.Touch
+    tr.TouchpointFlag = GT_dev.TouchpointFlag
+    tr.TouchCount = GT_dev.TouchCount
+    tr.Touchkeytrackid = GT_dev.Touchkeytrackid
+    tr.S = GT_dev.S
+    tr.X = GT_dev.Y
+    tr.Y = GT_dev.X
+    tr.X = [xres - x for x in tr.X]
+    return tr
+        
 ###############  start of emu demo  #####################
 try: 
     # generation ....
@@ -351,7 +370,7 @@ try:
     while (1):
         # emulate the chat app...
         # if 1:
-        gt.GT_Scan(GT_Dev, GT_Old)                
+        gt.GT_Scan(GT_Dev, GT_Old)
         # dedup, avoid exposing repeated events to app
         if(GT_Old.X[0] == GT_Dev.X[0] and GT_Old.Y[0] == GT_Dev.Y[0] and GT_Old.S[0] == GT_Dev.S[0]):
             continue
@@ -359,10 +378,33 @@ try:
         # meaning touch event ready to be read out
         if(GT_Dev.TouchpointFlag):
             GT_Dev.TouchpointFlag = 0
-            print(f"touch ev GT_Dev.X[0]: {GT_Dev.X[0]}, GT_Dev.Y[0]: {GT_Dev.Y[0]}, GT_Dev.S[0]: {GT_Dev.S[0]}")
-            # print("scrolling back...")
-            eink_display.scroll_view(eink_display.scroll_offset - 10)
 
+            # not working
+            # transpose_touch_inplace(GT_Dev, eink_display.xres)
+            # transpose_touch_inplace(GT_Old, eink_display.xres)
+            touchnew = transpose_touch(GT_Dev, eink_display.xres)
+            touchold = transpose_touch(GT_Old, eink_display.xres)
+            
+            touchx,touchy,touchs = touchnew.X[0], touchnew.Y[0], touchnew.S[0]
+            # print(f"touch ev touchx {touchx}, touchy {touchy}, touchs {touchs}")
+            
+            # if touchy < eink_display.yres // 4:
+            if touchy < eink_display.yres // 2:
+                if touchs <= 40: # light touch
+                    print("scrolling up...")
+                    eink_display.scroll_view(eink_display.scroll_offset - 10)
+                else: 
+                    print("scrolling to top...")
+                    eink_display.scroll_view_ratio(0)
+            # if touchy > eink_display.yres * 3 // 4:
+            if touchy > eink_display.yres // 2:
+                if touchs <= 40:
+                    print("scrolling down...")
+                    eink_display.scroll_view(eink_display.scroll_offset + 10)
+                else:
+                    print("scrolling to bottom...")
+                    eink_display.scroll_view_ratio(1.0)
+            
     eink_display.stop()
     eink_display.epd.sleep()
     # dbg: Save the text image as a bmp file

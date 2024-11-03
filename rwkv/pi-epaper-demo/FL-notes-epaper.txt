@@ -44,3 +44,10 @@ used to update only a part of the display instead of refreshing the entire scree
 
 
 
+ref: 
+Floyd-Steinberg (dithering algo
+https://www.waveshare.com/wiki/E-Paper_Floyd-Steinberg
+
+pwnagotchi
+https://github.com/evilsocket/pwnagotchi
+https://www.waveshare.com/wiki/Template:2.13inch_e-Paper_HAT%2B_Pwn
