@@ -1,7 +1,4 @@
 '''
-
-EMU=1 python3 pi-demo.py
-
 test rwkv inference engine
 cf: https://pypi.org/project/rwkv/
 
@@ -12,7 +9,7 @@ https://myuva.sharepoint.com/:x:/r/sites/XSEL-RWKV/Shared%20Documents/RWKV/resul
 https://chatgpt.com/share/6722e34c-c920-8004-a2c2-0a99a4ecee00
 
 '''
-import sys, os, psutil
+import sys, os
 import time
 
 from rwkv.model import RWKV
@@ -58,7 +55,7 @@ class EInkDisplay:
         self.margin = 5 # px 
 
         # Set up fonts, idx=1 seems fixed width?
-        self.font_tiny = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), size=12, index=0)
+        # self.font_text = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), size=12, index=1)
         self.font_text = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), size=15, index=0)
         self.font_title = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), size=24)
 
@@ -103,13 +100,6 @@ class EInkDisplay:
             buffer = self.epd.getbuffer(self.base_image)
             self.epd.displayPartBaseImage(buffer)        
 
-        # Create a larger text image for scrolling
-        self.text_image_height = self.ymax * 20  # Set height to 20 times the e-ink display height
-        self.text_image = Image.new('1', (self.xmax, self.text_image_height), 255)  # 1-bit image (black and white)
-        self.text_draw = ImageDraw.Draw(self.text_image)
-        self.scroll_offset = 0   # in pixel
-        self.max_y_position = 0  # Track the maximum y_position that has ever been rendered
-
     def hard_reset(self):
         # Initialize the e-ink display
         self.epd = epd2in13_V4.EPD()
@@ -130,73 +120,37 @@ class EInkDisplay:
         
         need_update = False
 
-        # print(f"print_token_scroll() token: [{token}]")
+        print(f"print_token_scroll() token: [{token}]")
 
         # text_width = self.font_text.getlength(token + " ")
         _, _, text_width, _ = self.font_text.getbbox(token)
 
-        # start a new line 
         if self.x_position + text_width > self.xmax:
             self.x_position = self.margin
             self.y_position += self.row_height
             need_update = True
 
-        # Hit the bottom of the text image (rare case); drop the top part of the text image
-        if self.y_position + self.text_height > self.text_image_height:  
-            self.x_position = self.margin
+        if self.y_position + self.text_height > self.ymax:    # hit the bottom of the text area
+            # self.reset_position()
+            self.x_position = self.margin   
             self.y_position -= self.row_height
-            # Shift the contents of the text_image up by row_height
-            shifted_image = self.text_image.crop((0, self.row_height, self.xmax, self.text_image_height))
-            self.text_image.paste(shifted_image, (0, 0))
+            # Shift the contents of the base_image up by row_height
+            shifted_image = self.base_image.crop((0, self.row_height, self.xmax, self.ymax))
+            self.base_image.paste(shifted_image, (0, 0))
             # Fill the region of the bottom row with white
-            self.text_draw.rectangle((0, self.text_image_height - self.row_height, self.xmax, self.text_image_height), fill=255)
+            self.base_draw.rectangle((0, self.ymax - self.row_height, self.xmax, self.ymax), fill=255)
+            self.base_draw = ImageDraw.Draw(self.base_image)
+            need_update = True
 
-        # Draw the token on the text image
-        self.text_draw.text((self.x_position, self.y_position), token, font=self.font_text, fill=0)
+        # Draw the token on the base image
+        self.base_draw.text((self.x_position, self.y_position), token, font=self.font_text, fill=0)
 
         # Update the x_position for the next word
         self.x_position += text_width
 
-        # Update the maximum y_position
-        self.max_y_position = max(self.max_y_position, self.y_position)
-
-        # Update the scroll offset to keep at the bottom
-        self.scroll_offset = max(0, self.y_position + self.text_height - self.ymax)
-
-        # Update the base image by cropping the relevant part of the text image
-        # self.update_viewport(self.scroll_offset)
-
         # print("xpos:", self.x_position, "ypos:", self.y_position)
 
-        # Update the base image by cropping the relevant part of the text image
-        cropped_image = self.text_image.crop((0, self.scroll_offset, self.xmax, self.scroll_offset + self.ymax))
-        self.base_image.paste(cropped_image, (0, 0))
-
-        # Draw the vertical progress bar based on the scroll offset
-        # progress = self.scroll_offset / (self.max_y_position - self.ymax)  # Calculate the scroll progress (0 to 1)
-        # progress_bar_width = 3  # Width of the progress bar
-        # progress_bar_height = int(self.ymax * progress)
-        # self.base_draw.rectangle((self.xmax - progress_bar_width, 0, self.xmax, self.ymax), fill=255)  # Clear previous progress bar
-        # self.base_draw.rectangle((self.xmax - progress_bar_width, 0, self.xmax, progress_bar_height), fill=0)  # Draw new progress bar
-
-        # Draw CPU utilization for cores 0-3 in a 2x2 grid
-        cpu_usages = psutil.cpu_percent(percpu=True)[:4]
-        grid_x_start = self.xres - 30  # Bottom-right corner grid starting position
-        grid_y_start = self.yres - 30
-        grid_width = 15
-        grid_height = 15
-
-        for i in range(2):
-            for j in range(2):
-                core_index = i * 2 + j
-                usage_text = f"{int(cpu_usages[core_index])}"  # Only print the integer usage value (0-99)
-                x_pos = grid_x_start + j * grid_width
-                y_pos = grid_y_start + i * grid_height
-                self.base_draw.rectangle((x_pos, y_pos, x_pos + grid_width, y_pos + grid_height), fill=255)  # Clear previous value
-                self.base_draw.text((x_pos + 2, y_pos + 2), usage_text, font=self.font_tiny, fill=0)  # Draw CPU usage
-
-        # if need_update:
-        if True:
+        if need_update:
             # print("try to update display...")
             with self.display_condition:
                 # Update the e-ink display with the new token using partial update
@@ -209,35 +163,6 @@ class EInkDisplay:
 
                 self.display_buffer = self.base_image.copy()
                 self.display_condition.notify()
-
-    # scroll_offset: pixel 
-    def scroll_view(self, scroll_offset):
-        # Set the new scroll offset
-        self.scroll_offset = max(0, min(scroll_offset, self.text_image_height - self.ymax))
-        # Update the base image by cropping the relevant part of the text image
-        self.update_viewport(self.scroll_offset)
-
-    def scroll_view_ratio(self, ratio):
-        # Set the new scroll offset based on the ratio
-        ratio = max(0.0, min(ratio, 1.0))
-        scroll_offset = int((self.max_y_position - self.ymax) * ratio)
-        self.scroll_view(scroll_offset)
-
-    def update_viewport(self, scroll_offset):
-        cropped_image = self.text_image.crop((0, scroll_offset, self.xmax, scroll_offset + self.ymax))
-        self.base_image.paste(cropped_image, (0, 0))
-
-        # Draw the vertical progress bar based on the scroll offset
-        progress = scroll_offset / (self.max_y_position - self.ymax)  # Calculate the scroll progress (0 to 1)
-        progress_bar_width = 3  # Width of the progress bar
-        progress_bar_height = int(self.ymax * progress)
-        self.base_draw.rectangle((self.xmax - progress_bar_width, 0, self.xmax, self.ymax), fill=255)  # Clear previous progress bar
-        self.base_draw.rectangle((self.xmax - progress_bar_width, 0, self.xmax, progress_bar_height), fill=0)  # Draw new progress bar
-
-        # Copy the base_image buffer for the display thread
-        with self.display_condition:
-            self.display_buffer = self.base_image.copy()
-            self.display_condition.notify()
 
     def display_update_worker(self):
         print("Display update worker started")
@@ -254,7 +179,7 @@ class EInkDisplay:
                 buffer_to_display = self.display_buffer
                 self.display_buffer = None
 
-            print("Displaying buffer...")
+            # print("Displaying buffer...")
             # Update the e-ink display with the new buffer using partial update
             # creates a byte array buffer that the e-ink driver can use to perform the partial update on the display
             buffer = self.epd.getbuffer(buffer_to_display)
@@ -268,12 +193,55 @@ class EInkDisplay:
             self.display_condition.notify()
         self.display_thread.join()
 
+    # print token, update per line (roughly)
+    # clear the page when full, and restart from top
+    # NB: token from rwkv contains a leading (?) space already
+    def print_token_cleanpage(self, token):
+        # if "\n" in token:
+        #     breakpoint()
+        # if token == "\n":
+        #     self.y_position += 20  # Move to next line
+        #     self.x_position = 10
+
+        # preprocess... 
+        token = token.replace('\n\n', '■')
+        
+        need_update = False
+
+        # text_width = self.font_text.getlength(token + " ")
+        _, _, text_width_nospace, _ = self.font_text.getbbox(token)
+        _, _, text_width, _ = self.font_text.getbbox(token + " ")
+
+        if self.x_position + text_width_nospace > self.xmax:
+            self.y_position += self.row_height
+            self.x_position = self.margin
+            need_update = True       # a new line starts, refresh
+
+        if self.y_position + self.text_height > self.ymax:
+            self.clear_text_area()
+            self.reset_position()
+            need_update = True
+
+        # Draw the token on the base image
+        self.base_draw.text((self.x_position, self.y_position), token, font=self.font_text, fill=0)
+
+        # Update the x_position for the next word
+        self.x_position += text_width
+
+        if need_update:  # async, notify the display thread ... 
+            # Update the e-ink display with the new token using partial update
+            # start_time = time.time()  # Start measuring time
+            # takes ~0.6 sec...
+            buffer = self.epd.getbuffer(self.base_image)
+            self.epd.displayPartial(buffer)
+            # end_time = time.time()  # End measuring time
+            # print(f"Token display time: {end_time - start_time:.4f} seconds")
+
 picdir = './pic'  
 eink_display = EInkDisplay(picdir)
 
 # emulate the chat app...
-# if 1:
-if os.environ.get("EMU") == '1':
+if 0:
     text = '''
     In the heart of a bustling city lies a quaint little café, hidden away from the busy streets and towering skyscrapers. The café, named "The Hidden Petal," has an atmosphere that radiates warmth and nostalgia, reminiscent of a time when life moved more slowly and people lingered over their coffee without a care in the world. The walls are adorned with vintage photographs, faded floral wallpaper, and shelves lined with books of all sorts, inviting patrons to stay and lose themselves in their pages. Small wooden tables are arranged with a view of the large window, which frames a charming garden filled with colorful flowers and gentle vines. The aroma of freshly baked croissants, ground coffee beans, and the distant sound of soft jazz music fills the air, creating an ambiance that makes one want to curl up with a book and forget the passage of time. The patrons, a mix of regulars and curious newcomers, seem to speak in hushed tones, as if not wanting to disturb the delicate tranquility of the place. Here, it feels as if the hustle and hurry of the world are miles away, and for a moment, time stands still, allowing one to simply be
     '''
@@ -282,24 +250,8 @@ if os.environ.get("EMU") == '1':
         eink_display.print_token_scroll(' ' + token)
         # no delay
     eink_display.print_token_scroll('■                                ')
-    time.sleep(1) # wait for the last screen to be rendered
-
-    # debug: scroll back 
-    # for i in range(20):
-    #     print("scrolling back...")
-    #     eink_display.scroll_view(eink_display.scroll_offset - 10)
-    #     time.sleep(1) 
-
-    for i in range(10):
-        print("scrolling fwd...")
-        eink_display.scroll_view_ratio(0.1 * i)
-        time.sleep(1) 
-
     eink_display.stop()        
-    eink_display.epd.sleep()    
-    # dbg: Save the text image as a bmp file
-    # eink_display.text_image.save("text.bmp")
-    # eink_display.base_image.save("base.bmp")
+    eink_display.epd.sleep()
     sys.exit(0)
 ###### 
 
@@ -428,7 +380,5 @@ t2 = time.time()
 print(f"model build: {(t1-t0):.2f} sec, exec {TOKEN_CNT} tokens in {(t2-t1):.2f} sec, {TOKEN_CNT/(t2-t1):.2f} tok/sec")
 
 eink_display.print_token_scroll('■                                ')
-time.sleep(1) # wait for the last screen to be rendered
-
 eink_display.epd.sleep()
 eink_display.stop()

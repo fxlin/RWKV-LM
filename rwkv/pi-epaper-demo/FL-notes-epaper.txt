@@ -5,6 +5,7 @@ pip install -e .
 pip install spidev
 pip install gpiozero
 pip install lgpio
+pip install psutil
 
 https://www.waveshare.com/wiki/2.13inch_Touch_e-Paper_HAT_Manual#python
 
