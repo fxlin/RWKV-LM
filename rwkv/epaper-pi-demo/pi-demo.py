@@ -5,6 +5,9 @@ cf: https://pypi.org/project/rwkv/
 speed benchmark res - see of file
 full res: 
 https://myuva.sharepoint.com/:x:/r/sites/XSEL-RWKV/Shared%20Documents/RWKV/results_rwkv.xlsx?d=wbf0bd61c5429469a8c039df4d8d4f46a&csf=1&web=1&e=0dyjUv
+
+https://chatgpt.com/share/6722e34c-c920-8004-a2c2-0a99a4ecee00
+
 '''
 import sys, os
 import time
@@ -52,9 +55,10 @@ class EInkDisplay:
         # text area margin, to the boundary 
         self.margin = 5 # px 
 
-        # Set up fonts
-        self.font_text = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), 15)
-        self.font_title = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), 24)
+        # Set up fonts, idx=1 seems fixed width?
+        # self.font_text = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), size=12, index=1)
+        self.font_text = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), size=15, index=0)
+        self.font_title = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), size=24)
 
         # calculate row height ... 1.5x of text height
         left, top, right, bottom,  = self.font_text.getbbox("A")
@@ -98,21 +102,23 @@ class EInkDisplay:
         end_time = time.time()  # End measuring time
         print(f"Clr time: {end_time - start_time:.4f} seconds")
 
-    def print_token1(self, token):
+    # NB: token from rwkv contains a leading (?) space already
+    def print_token_scroll(self, token):
         # preprocess... 
+        token = token.replace('  ', ' ')
         token = token.replace('\n\n', '■')
         
         need_upate = False
 
         # text_width = self.font_text.getlength(token + " ")
-        _, _, text_width, _ = self.font_text.getbbox(token + " ")
+        _, _, text_width, _ = self.font_text.getbbox(token)
 
         if self.x_position + text_width > self.xmax:
             self.x_position = self.margin
             self.y_position += self.row_height
             need_upate = True
 
-        if self.y_position + self.text_height > self.ymax:    # will draw out of boundary
+        if self.y_position + self.text_height > self.ymax:    # hit the bottom of the text area
             # self.reset_position()
             self.x_position = self.margin   
             self.y_position -= self.row_height
@@ -130,7 +136,7 @@ class EInkDisplay:
         # Update the x_position for the next word
         self.x_position += text_width
 
-        print("xpos:", self.x_position, "ypos:", self.y_position)
+        # print("xpos:", self.x_position, "ypos:", self.y_position)
 
         if need_upate:
             # Update the e-ink display with the new token using partial update
@@ -142,7 +148,9 @@ class EInkDisplay:
             # print(f"Token display time: {end_time - start_time:.4f} seconds")
 
     # print token, update per line (roughly)
-    def print_token(self, token):
+    # clear the page when full, and restart from top
+    # NB: token from rwkv contains a leading (?) space already
+    def print_token_cleanpage(self, token):
         # if "\n" in token:
         #     breakpoint()
         # if token == "\n":
@@ -187,14 +195,15 @@ picdir = './pic'
 eink_display = EInkDisplay(picdir)
 
 # emulate the chat app...
-text = '''
-In the heart of a bustling city lies a quaint little café, hidden away from the busy streets and towering skyscrapers. The café, named "The Hidden Petal," has an atmosphere that radiates warmth and nostalgia, reminiscent of a time when life moved more slowly and people lingered over their coffee without a care in the world. The walls are adorned with vintage photographs, faded floral wallpaper, and shelves lined with books of all sorts, inviting patrons to stay and lose themselves in their pages. Small wooden tables are arranged with a view of the large window, which frames a charming garden filled with colorful flowers and gentle vines. The aroma of freshly baked croissants, ground coffee beans, and the distant sound of soft jazz music fills the air, creating an ambiance that makes one want to curl up with a book and forget the passage of time. The patrons, a mix of regulars and curious newcomers, seem to speak in hushed tones, as if not wanting to disturb the delicate tranquility of the place. Here, it feels as if the hustle and hurry of the world are miles away, and for a moment, time stands still, allowing one to simply be
-'''
-for token in text.split():
-    # eink_display.print_token(token)
-    eink_display.print_token1(token)
-    # no delay
-sys.exit(0)
+if 0:
+    text = '''
+    In the heart of a bustling city lies a quaint little café, hidden away from the busy streets and towering skyscrapers. The café, named "The Hidden Petal," has an atmosphere that radiates warmth and nostalgia, reminiscent of a time when life moved more slowly and people lingered over their coffee without a care in the world. The walls are adorned with vintage photographs, faded floral wallpaper, and shelves lined with books of all sorts, inviting patrons to stay and lose themselves in their pages. Small wooden tables are arranged with a view of the large window, which frames a charming garden filled with colorful flowers and gentle vines. The aroma of freshly baked croissants, ground coffee beans, and the distant sound of soft jazz music fills the air, creating an ambiance that makes one want to curl up with a book and forget the passage of time. The patrons, a mix of regulars and curious newcomers, seem to speak in hushed tones, as if not wanting to disturb the delicate tranquility of the place. Here, it feels as if the hustle and hurry of the world are miles away, and for a moment, time stands still, allowing one to simply be
+    '''
+    for token in text.split():
+        # eink_display.print_token(token)
+        eink_display.print_token_scroll(' ' + token)
+        # no delay
+    sys.exit(0)
 ###### 
 
 # rva
@@ -219,13 +228,13 @@ sys.exit(0)
 # model_path='/data/models/0.1b-pre-x59-16x-1451'
 # model_path='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-pretrain-x59/from-hpc/rwkv-976'
 
-model_path='/data/models/pi-deployment/01b-pre-x52-1455'
+# model_path='/data/models/pi-deployment/01b-pre-x52-1455'
 # model_path='/data/models/pi-deployment/01b-pre-x58-512'
 
 # model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
 # model_path='/data/models/pi-deployment/01b-pre-x59-976'
 # model_path='/data/models/pi-deployment/04b-tunefull-x58-562'
-# model_path='/data/models/pi-deployment/04b-pre-x59-2405'
+model_path='/data/models/pi-deployment/04b-pre-x59-2405'
 
 # model_path='/data/models/rwkv-04b-pre-x59-860'
 
@@ -285,13 +294,13 @@ model = RWKV(model=model_path,
              verbose=True)
 #              head_K=200, load_token_cls='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/from-hpc/rwkv-823-cls.npy')
 
-
-
 pipeline = PIPELINE(model, "rwkv_vocab_v20230424")
 
 # ex prompt from paper: https://arxiv.org/pdf/2305.07759
 # ctx = "\nWhat is the sum of 123 and 456"
-ctx = "\nElon Musk has"
+# ctx = "\nElon Musk has"
+ctx = "\nUniversity of Virginia is"
+# ctx = u"\n我们认为"
 # ctx = "\nAlice was so tired when she got back home so she went"
 # ctx = "\nLily likes cats and dogs. She asked her mom for a dog and her mom said no, so instead she asked"
 # ctx = "\nOnce upon a time there was a little girl named Lucy"
@@ -299,6 +308,8 @@ print(ctx, end='')
 
 def my_print(s):
     print(s, end='', flush=True)
+
+eink_display.print_token_scroll(ctx.replace('\n', ''))
 
 t1 = time.time()
 
@@ -313,13 +324,12 @@ args = PIPELINE_ARGS(temperature = 1.0, top_p = 0.7, top_k = 100, # top_k = 0 th
                      token_stop = [], # stop generation whenever you see any token here
                      chunk_len = 256) # split input into chunks to save VRAM (shorter -> slower)
 
-TOKEN_CNT = 200 
-pipeline.generate(ctx, token_count=TOKEN_CNT, args=args, callback=eink_display.print_token)
+TOKEN_CNT = 100 
+pipeline.generate(ctx, token_count=TOKEN_CNT, args=args, callback=eink_display.print_token_scroll)
 print('\n')
-
 t2 = time.time()
 
+eink_display.print_token_scroll('■                                ')
+eink_display.epd.sleep()
+
 print(f"model build: {(t1-t0):.2f} sec, exec {TOKEN_CNT} tokens in {(t2-t1):.2f} sec, {TOKEN_CNT/(t2-t1):.2f} tok/sec")
-
-
-     
