@@ -6,8 +6,14 @@ pip install spidev
 pip install gpiozero
 pip install lgpio
 pip install psutil
+pip install smbus
 
 https://www.waveshare.com/wiki/2.13inch_Touch_e-Paper_HAT_Manual#python
+
+
+# touch lib (TP_lib, in fact only needs this l-- both display and touch ) 
+cd ~/workspace-waveshare/example/python
+python setup.py develop
 
 
 python3 -m venv myenv

@@ -41,8 +41,7 @@ if os.environ.get('RWKV_CUDA_ON') != '0':
 # 2in13_V4, 250x122
 # https://www.waveshare.com/wiki/2.13inch_Touch_e-Paper_HAT_Manual
 import logging
-# from waveshare_epd import epd2in13_V4  # conflicts with TP_lib for GPIO pins
-from TP_lib import epd2in13_V4
+from waveshare_epd import epd2in13_V4
 from PIL import Image,ImageDraw,ImageFont
 
 class EInkDisplay:
@@ -115,8 +114,7 @@ class EInkDisplay:
     def hard_reset(self):
         # Initialize the e-ink display
         self.epd = epd2in13_V4.EPD()
-        # self.epd.init()
-        self.epd.init(self.epd.FULL_UPDATE)
+        self.epd.init()
 
         # clr: about 2.2 sec....
         start_time = time.time()  # Start measuring time
@@ -282,108 +280,39 @@ class EInkDisplay:
             self.display_condition.notify()
         self.display_thread.join()
 
-
 picdir = './pic'  
 eink_display = EInkDisplay(picdir)
 
-###############  touch device #####################
-# cf: https://www.waveshare.com/wiki/2.13inch_Touch_e-Paper_HAT_Manual#Touch_Driver (for C) 
+# emulate the chat app...
+# if 1:
+if os.environ.get("EMU") == '1':
+    text = '''
+    In the heart of a bustling city lies a quaint little café, hidden away from the busy streets and towering skyscrapers. The café, named "The Hidden Petal," has an atmosphere that radiates warmth and nostalgia, reminiscent of a time when life moved more slowly and people lingered over their coffee without a care in the world. The walls are adorned with vintage photographs, faded floral wallpaper, and shelves lined with books of all sorts, inviting patrons to stay and lose themselves in their pages. Small wooden tables are arranged with a view of the large window, which frames a charming garden filled with colorful flowers and gentle vines. The aroma of freshly baked croissants, ground coffee beans, and the distant sound of soft jazz music fills the air, creating an ambiance that makes one want to curl up with a book and forget the passage of time. The patrons, a mix of regulars and curious newcomers, seem to speak in hushed tones, as if not wanting to disturb the delicate tranquility of the place. Here, it feels as if the hustle and hurry of the world are miles away, and for a moment, time stands still, allowing one to simply be
+    '''
+    for token in text.split():
+        # eink_display.print_token(token)
+        eink_display.print_token_scroll(' ' + token)
+        # no delay
+    eink_display.print_token_scroll('■                                ')
+    time.sleep(1) # wait for the last screen to be rendered
 
-# GT_Development -- stores information about the current touch points
+    # debug: scroll back 
+    # for i in range(20):
+    #     print("scrolling back...")
+    #     eink_display.scroll_view(eink_display.scroll_offset - 10)
+    #     time.sleep(1) 
 
-from TP_lib import gt1151
-gt = gt1151.GT1151()
-GT_Dev = gt1151.GT_Development()
+    for i in range(10):
+        print("scrolling fwd...")
+        eink_display.scroll_view_ratio(0.1 * i)
+        time.sleep(1) 
 
-# seems to be used to store the old or previous state of the touch information
-GT_Old = gt1151.GT_Development()
-
-flag_t = 1   # flag: if gt.INT is high, indicates a touch event
-
-# touch dev polling thread, set a flag showing if a touch even has occurred
-# xzl: NB: GT_Dev is a global obj. ::Touch is a flag set by this thread
-# below polling???
-# ::Touch will be examined by class code of GT1151::GT_scan()
-def pthread_irq() :
-    print("pthread running")    
-    while flag_t == 1 :
-    # xzl: non blocking? inefficient...     
-        if(gt.digital_read(gt.INT) == 0) :    
-            GT_Dev.Touch = 1
-        else :
-            GT_Dev.Touch = 0
-    print("thread:exit")
-
-###############  start of mini touch ex #####################
-try: 
-    gt.GT_Init()
-
-    # touch dev polling thread
-    t = threading.Thread(target = pthread_irq)
-    t.setDaemon(True)
-    t.start()
-
-    while (1):
-        gt.GT_Scan(GT_Dev, GT_Old)
-        # dedup, avoid exposing repeated events to app
-        if(GT_Old.X[0] == GT_Dev.X[0] and GT_Old.Y[0] == GT_Dev.Y[0] and GT_Old.S[0] == GT_Dev.S[0]):
-            continue
-
-        # meaning touch event ready to be read out
-        if(GT_Dev.TouchpointFlag):
-            GT_Dev.TouchpointFlag = 0
-            print(f"touch ev GT_Dev.X[0]: {GT_Dev.X[0]}, GT_Dev.Y[0]: {GT_Dev.Y[0]}, GT_Dev.S[0]: {GT_Dev.S[0]}")
-
-except IOError as e:
-    logging.info(e)
-
-except KeyboardInterrupt:    
-    logging.info("ctrl + c:")
-    eink_display.epd.sleep()
-    time.sleep(2)
-    eink_display.stop()
-    eink_display.epd.Dev_exit()
-    exit()
-
-###############  start of emu demo  #####################
-    while (1):
-        # emulate the chat app...
-        # if 1:
-        if os.environ.get("EMU") == '1':
-            text = '''
-            In the heart of a bustling city lies a quaint little café, hidden away from the busy streets and towering skyscrapers. The café, named "The Hidden Petal," has an atmosphere that radiates warmth and nostalgia, reminiscent of a time when life moved more slowly and people lingered over their coffee without a care in the world. The walls are adorned with vintage photographs, faded floral wallpaper, and shelves lined with books of all sorts, inviting patrons to stay and lose themselves in their pages. Small wooden tables are arranged with a view of the large window, which frames a charming garden filled with colorful flowers and gentle vines. The aroma of freshly baked croissants, ground coffee beans, and the distant sound of soft jazz music fills the air, creating an ambiance that makes one want to curl up with a book and forget the passage of time. The patrons, a mix of regulars and curious newcomers, seem to speak in hushed tones, as if not wanting to disturb the delicate tranquility of the place. Here, it feels as if the hustle and hurry of the world are miles away, and for a moment, time stands still, allowing one to simply be
-            '''
-            for token in text.split():
-                # eink_display.print_token(token)
-                eink_display.print_token_scroll(' ' + token)
-                # no delay
-            eink_display.print_token_scroll('■                                ')
-            time.sleep(1) # wait for the last screen to be rendered
-
-            # debug: scroll back 
-            # for i in range(20):
-            #     print("scrolling back...")
-            #     eink_display.scroll_view(eink_display.scroll_offset - 10)
-            #     time.sleep(1) 
-
-            for i in range(10):
-                print("scrolling fwd...")
-                eink_display.scroll_view_ratio(0.1 * i)
-                time.sleep(1) 
-
-            eink_display.stop()        
-            eink_display.epd.sleep()    
-            # dbg: Save the text image as a bmp file
-            # eink_display.text_image.save("text.bmp")
-            # eink_display.base_image.save("base.bmp")
-            sys.exit(0)
-except KeyboardInterrupt:    
-    logging.info("ctrl + c:")
-    eink_display.epd.sleep()
-    time.sleep(2)
-    eink_display.stop()
-    eink_display.epd.Dev_exit()
-    exit()
+    eink_display.stop()        
+    eink_display.epd.sleep()    
+    # dbg: Save the text image as a bmp file
+    # eink_display.text_image.save("text.bmp")
+    # eink_display.base_image.save("base.bmp")
+    sys.exit(0)
 ###### 
 
 # rva
@@ -410,6 +339,29 @@ except KeyboardInterrupt:
 
 model_path='/data/models/pi-deployment/01b-pre-x52-1455'
 # model_path='/data/models/pi-deployment/01b-pre-x58-512'
+
+# model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
+# model_path='/data/models/pi-deployment/01b-pre-x59-976'
+# model_path='/data/models/pi-deployment/04b-tunefull-x58-562'
+# model_path='/data/models/pi-deployment/04b-pre-x59-2405'  # <--- works for demo
+
+# model_path='/data/models/rwkv-04b-pre-x59-860'
+
+# model_path='/data/models/pi-deployment/1b5-pre-x59-929'
+# model_path='/data/models/pi-deployment/01b-pre-x59-CLS-TEST'
+
+# #Only head.l1 tuned. KL loss (good
+# model_path='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/run3-KL-loss/rwkv-43'
+
+#model_path='/data/home/bfr4xr/RWKV-LM/RWKV-v5/out/01b-cls-mine/run3-KL-loss/rwkv-43'
+#model_path='/data/home/bfr4xr/RWKV-LM/RWKV-v5/out/01b-pre-x59-8x-cls/from-hpc/rwkv-1366'
+#model_path='/data/home/bfr4xr/RWKV-LM/RWKV-v5/out/01b-pre-x59-8x-cls/from-hpc/0.1b-official'
+# only head.l1fc1, head.l1fc2 (MLP) trained. KL loss
+#   very bad
+# model_path='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/run5-KL-loss-MLP-KaimingInit/rwkv-230'
+#   very bad
+# model_path='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/run4-KL-loss-MLP/rwkv-40'
+
 
 print(f'Loading model - {model_path}')
 
@@ -492,5 +444,3 @@ time.sleep(1) # wait for the last screen to be rendered
 
 eink_display.epd.sleep()
 eink_display.stop()
-
-

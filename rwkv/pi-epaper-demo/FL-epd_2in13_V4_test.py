@@ -1,5 +1,11 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
+
+
+'''
+xzl: only display, no touch
+'''
+
 import sys
 import os
 picdir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'pic')
