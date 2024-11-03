@@ -47,10 +47,11 @@ from PIL import Image,ImageDraw,ImageFont
 class EInkDisplay:
     def __init__(self, picdir):
         # https://www.waveshare.com/wiki/2.13inch_Touch_e-Paper_HAT_Manual
+        # screen dimension
         self.xres = 250
         self.yres = 122 
 
-        # text area
+        # text area, dimension
         self.xmax = self.xres
         self.ymax = self.yres - 30  # Leave some space for the menu
 
@@ -157,17 +158,18 @@ class EInkDisplay:
         # Update the x_position for the next word
         self.x_position += text_width
 
-        # Update the maximum y_position
+        # Update the maximum y_position (the maximum rendered text height, so far)
         self.max_y_position = max(self.max_y_position, self.y_position)
 
         # Update the scroll offset to keep at the bottom
         self.scroll_offset = max(0, self.y_position + self.text_height - self.ymax)
 
         # Update the base image by cropping the relevant part of the text image
-        # self.update_viewport(self.scroll_offset)
+        self.update_viewport(self.scroll_offset)
 
         # print("xpos:", self.x_position, "ypos:", self.y_position)
 
+        '''
         # Update the base image by cropping the relevant part of the text image
         cropped_image = self.text_image.crop((0, self.scroll_offset, self.xmax, self.scroll_offset + self.ymax))
         self.base_image.paste(cropped_image, (0, 0))
@@ -178,22 +180,6 @@ class EInkDisplay:
         # progress_bar_height = int(self.ymax * progress)
         # self.base_draw.rectangle((self.xmax - progress_bar_width, 0, self.xmax, self.ymax), fill=255)  # Clear previous progress bar
         # self.base_draw.rectangle((self.xmax - progress_bar_width, 0, self.xmax, progress_bar_height), fill=0)  # Draw new progress bar
-
-        # Draw CPU utilization for cores 0-3 in a 2x2 grid
-        cpu_usages = psutil.cpu_percent(percpu=True)[:4]
-        grid_x_start = self.xres - 30  # Bottom-right corner grid starting position
-        grid_y_start = self.yres - 30
-        grid_width = 15
-        grid_height = 15
-
-        for i in range(2):
-            for j in range(2):
-                core_index = i * 2 + j
-                usage_text = f"{int(cpu_usages[core_index])}"  # Only print the integer usage value (0-99)
-                x_pos = grid_x_start + j * grid_width
-                y_pos = grid_y_start + i * grid_height
-                self.base_draw.rectangle((x_pos, y_pos, x_pos + grid_width, y_pos + grid_height), fill=255)  # Clear previous value
-                self.base_draw.text((x_pos + 2, y_pos + 2), usage_text, font=self.font_tiny, fill=0)  # Draw CPU usage
 
         # if need_update:
         if True:
@@ -209,6 +195,7 @@ class EInkDisplay:
 
                 self.display_buffer = self.base_image.copy()
                 self.display_condition.notify()
+        '''
 
     # scroll_offset: pixel 
     def scroll_view(self, scroll_offset):
@@ -228,11 +215,36 @@ class EInkDisplay:
         self.base_image.paste(cropped_image, (0, 0))
 
         # Draw the vertical progress bar based on the scroll offset
-        progress = scroll_offset / (self.max_y_position - self.ymax)  # Calculate the scroll progress (0 to 1)
+
+        # we haven't rendered one screen worth of text ...
+        if self.max_y_position == 0 or self.max_y_position <= self.ymax:
+            progress = 0
+        else: 
+            progress = scroll_offset / (self.max_y_position - self.ymax)  # Calculate the scroll progress (0 to 1)
+            # progress = scroll_offset / self.max_y_position  # Calculate the scroll progress (0 to 1)
+        if progress > 1:   # also means we haven't rendered one screen worth of text
+            progress = 0
         progress_bar_width = 3  # Width of the progress bar
-        progress_bar_height = int(self.ymax * progress)
+        progress_bar_height = int(self.ymax * progress)     # calculated height of the progress bar (per progress
         self.base_draw.rectangle((self.xmax - progress_bar_width, 0, self.xmax, self.ymax), fill=255)  # Clear previous progress bar
+        print(f"scroll_offset {scroll_offset} max_y_position {self.max_y_position} ymax {self.ymax} progress: {progress}, height: {progress_bar_height}")
         self.base_draw.rectangle((self.xmax - progress_bar_width, 0, self.xmax, progress_bar_height), fill=0)  # Draw new progress bar
+
+        # Draw CPU utilization for cores 0-3 in a 2x2 grid
+        cpu_usages = psutil.cpu_percent(percpu=True)[:4]
+        grid_x_start = self.xres - 30  # Bottom-right corner grid starting position
+        grid_y_start = self.yres - 30
+        grid_width = 15
+        grid_height = 15
+
+        for i in range(2):
+            for j in range(2):
+                core_index = i * 2 + j
+                usage_text = f"{int(cpu_usages[core_index])}"  # Only print the integer usage value (0-99)
+                x_pos = grid_x_start + j * grid_width
+                y_pos = grid_y_start + i * grid_height
+                self.base_draw.rectangle((x_pos, y_pos, x_pos + grid_width, y_pos + grid_height), fill=255)  # Clear previous value
+                self.base_draw.text((x_pos + 2, y_pos + 2), usage_text, font=self.font_tiny, fill=0)  # Draw CPU usage
 
         # Copy the base_image buffer for the display thread
         with self.display_condition:
