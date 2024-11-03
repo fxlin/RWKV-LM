@@ -28,6 +28,7 @@ try:
     epd = epd2in13_V4.EPD()
     gt = gt1151.GT1151()
     GT_Dev = gt1151.GT_Development()
+    # seems to be used to store the old or previous state of the touch information
     GT_Old = gt1151.GT_Development()
 
     epd.init(epd.FULL_UPDATE)   # must do this, otherwise, touch won't work (io error)
