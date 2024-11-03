@@ -225,21 +225,22 @@ class EInkDisplay:
         else: 
             progress = scroll_offset / (self.max_y_position - self.ymax)  # Calculate the scroll progress (0 to 1)
             # progress = scroll_offset / self.max_y_position  # Calculate the scroll progress (0 to 1)
-        if progress > 1:   # also means we haven't rendered one screen worth of text
-            progress = 0
+        if progress > 1:  
+            progress = 1 # is this right? TBD
         progress_bar_width = 3  # Width of the progress bar
         progress_bar_height = int(self.ymax * progress)     # calculated height of the progress bar (per progress
         self.base_draw.rectangle((self.xmax - progress_bar_width, 0, self.xmax, self.ymax), fill=255)  # Clear previous progress bar
         print(f"scroll_offset {scroll_offset} max_y_position {self.max_y_position} ymax {self.ymax} progress: {progress}, height: {progress_bar_height}")
         self.base_draw.rectangle((self.xmax - progress_bar_width, 0, self.xmax, progress_bar_height), fill=0)  # Draw new progress bar
 
-        # Draw CPU utilization for cores 0-3 in a 2x2 grid
+        '''
+        # Draw per core CPU utilization for cores 0-3 in a 2x2 grid
         cpu_usages = psutil.cpu_percent(percpu=True)[:4]
         grid_x_start = self.xres - 30  # Bottom-right corner grid starting position
         grid_y_start = self.yres - 30
         grid_width = 15
         grid_height = 15
-
+    
         for i in range(2):
             for j in range(2):
                 core_index = i * 2 + j
@@ -248,11 +249,66 @@ class EInkDisplay:
                 y_pos = grid_y_start + i * grid_height
                 self.base_draw.rectangle((x_pos, y_pos, x_pos + grid_width, y_pos + grid_height), fill=255)  # Clear previous value
                 self.base_draw.text((x_pos + 2, y_pos + 2), usage_text, font=self.font_tiny, fill=0)  # Draw CPU usage
+        '''
+
+        # Draw system information in a 2x2 grid
+        grid_x_start = self.xres - 50  # Bottom-right corner grid starting position
+        grid_y_start = self.yres - 30
+        grid_width = 25
+        grid_height = 15
+
+        # Row 0, Col 0: CPU utilization (average over all cores)
+        cpu_usage = int(psutil.cpu_percent())
+        x_pos = grid_x_start
+        y_pos = grid_y_start
+        self.base_draw.rectangle((x_pos, y_pos, x_pos + grid_width, y_pos + grid_height), fill=255)  # Clear previous value
+        self.base_draw.text((x_pos + 2, y_pos + 2), f"{cpu_usage}%", font=self.font_tiny, fill=0)
+
+        # Row 0, Col 1: CPU temperature (e.g., 60C)
+        cpu_temp = self.get_cpu_temperature()
+        x_pos = grid_x_start + grid_width
+        y_pos = grid_y_start
+        self.base_draw.rectangle((x_pos, y_pos, x_pos + grid_width, y_pos + grid_height), fill=255)  # Clear previous value
+        self.base_draw.text((x_pos + 2, y_pos + 2), f"{cpu_temp}C", font=self.font_tiny, fill=0)
+
+        # Row 1, Col 0: Memory used by the current process (e.g., 300M or 1.5G)
+        process = psutil.Process(os.getpid())
+        mem_usage = process.memory_info().rss
+        mem_usage_str = self.format_memory_size(mem_usage)
+        x_pos = grid_x_start
+        y_pos = grid_y_start + grid_height
+        self.base_draw.rectangle((x_pos, y_pos, x_pos + grid_width, y_pos + grid_height), fill=255)  # Clear previous value
+        self.base_draw.text((x_pos + 2, y_pos + 2), mem_usage_str, font=self.font_tiny, fill=0)
+
+        # Row 1, Col 1: Blank (TBD)
+        x_pos = grid_x_start + grid_width
+        y_pos = grid_y_start + grid_height
+        # self.base_draw.rectangle((x_pos, y_pos, x_pos + grid_width, y_pos + grid_height), fill=255)  # Clear previous value
 
         # Copy the base_image buffer for the display thread
         with self.display_condition:
             self.display_buffer = self.base_image.copy()
             self.display_condition.notify()
+
+    # rapsi 
+    def get_cpu_temperature(self):
+        try:
+            with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+                temp_str = f.readline().strip()
+                temp_c = int(temp_str) / 1000.0  # Convert from millidegrees to degrees Celsius
+                return round(temp_c)
+        except FileNotFoundError:
+            return 0
+
+    def format_memory_size(self, size_bytes):
+        if size_bytes < 1024:
+            return f"{size_bytes}B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes // 1024}K"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes // (1024 * 1024)}M"
+        else:
+            return f"{size_bytes / (1024 * 1024 * 1024):.1f}G"
 
     def display_update_worker(self):
         print("Display update worker started")
@@ -287,15 +343,73 @@ class EInkDisplay:
         self.display_thread.join()
 
 
-picdir = './pic'  
-eink_display = EInkDisplay(picdir)
+def model_gen(prompt=None):
+    # model_path='/data/models/pi-deployment/01b-pre-x52-1455'
+    model_path='/data/models/pi-deployment/04b-pre-x59-2405'  # <--- works for demo
+
+    print(f'Loading model - {model_path}')
+
+    if os.environ["RWKV_CUDA_ON"] == '1':
+        strategy='cuda fp16'
+        # strategy='cuda fp16i8',
+    else:
+        if is_amd_cpu():
+            strategy='cpu fp32'  # amd cpu lacks hard fp16...
+        else:
+            strategy='cpu fp16'
+        # strategy='cpu fp16i8'
+
+    t0 = time.time()
+    model = RWKV(model=model_path, 
+                strategy=strategy, 
+                verbose=True)
+    #              head_K=200, load_token_cls='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/from-hpc/rwkv-823-cls.npy')
+
+    pipeline = PIPELINE(model, "rwkv_vocab_v20230424")
+
+    if not prompt:
+        # ex prompt from paper: https://arxiv.org/pdf/2305.07759
+        # ctx = "\nWhat is the sum of 123 and 456"
+        # ctx = "\nElon Musk has"
+        ctx = "\nUniversity of Virginia is"
+        # ctx = u"\n我们认为"
+        # ctx = "\nAlice was so tired when she got back home so she went"
+        # ctx = "\nLily likes cats and dogs. She asked her mom for a dog and her mom said no, so instead she asked"
+        # ctx = "\nOnce upon a time there was a little girl named Lucy"
+        # print(ctx, end='')
+    else:
+        ctx = "\n" + prompt
+
+    # def my_print(s):
+    #     print(s, end='', flush=True)
+
+    eink_display.print_token_scroll(ctx.replace('\n', ''))
+
+    t1 = time.time()
+
+    # For alpha_frequency and alpha_presence, see "Frequency and presence penalties":
+    # https://platform.openai.com/docs/api-reference/parameter-details
+
+    args = PIPELINE_ARGS(temperature = 1.0, top_p = 0.7, top_k = 100, # top_k = 0 then ignore
+                        alpha_frequency = 0.25,
+                        alpha_presence = 0.25,
+                        alpha_decay = 0.996, # gradually decay the penalty
+                        token_ban = [0], # ban the generation of some tokens
+                        token_stop = [], # stop generation whenever you see any token here
+                        chunk_len = 256) # split input into chunks to save VRAM (shorter -> slower)
+
+    TOKEN_CNT = 100 
+    pipeline.generate(ctx, token_count=TOKEN_CNT, args=args, callback=eink_display.print_token_scroll)
+    print('\n')
+    t2 = time.time()
+    print(f"model build: {(t1-t0):.2f} sec, exec {TOKEN_CNT} tokens in {(t2-t1):.2f} sec, {TOKEN_CNT/(t2-t1):.2f} tok/sec")
+
+    eink_display.print_token_scroll('■                                ')
+    time.sleep(1) # wait for the last screen to be rendered
 
 ###############  touch device #####################
-# cf: https://www.waveshare.com/wiki/2.13inch_Touch_e-Paper_HAT_Manual#Touch_Driver (for C) 
-
 
 flag_t = 1 
-
 # touch dev polling thread, set a flag showing if a touch even has occurred
 # xzl: NB: GT_Dev is a global obj. ::Touch is a flag set by this thread
 # below polling???
@@ -309,7 +423,6 @@ def pthread_irq() :
         else :
             GT_Dev.Touch = 0
     print("thread:exit")
-
 
 # transpose the touch x-y to be same as the display x-y
 def transpose_touch_inplace(dev, xres):
@@ -328,9 +441,13 @@ def transpose_touch(GT_dev, xres):
     tr.X = [xres - x for x in tr.X]
     return tr
         
-###############  start of emu demo  #####################
+###############  start of rendering  #####################
+# cf: https://www.waveshare.com/wiki/2.13inch_Touch_e-Paper_HAT_Manual#Touch_Driver (for C) 
+picdir = './pic'  
+eink_display = EInkDisplay(picdir)
+
 try: 
-    # generation ....
+    # emu only 
     if os.environ.get("EMU") == '1':
         text = '''
         In the heart of a bustling city lies a quaint little café, hidden away from the busy streets and towering skyscrapers. The café, named "The Hidden Petal," has an atmosphere that radiates warmth and nostalgia, reminiscent of a time when life moved more slowly and people lingered over their coffee without a care in the world. The walls are adorned with vintage photographs, faded floral wallpaper, and shelves lined with books of all sorts, inviting patrons to stay and lose themselves in their pages. Small wooden tables are arranged with a view of the large window, which frames a charming garden filled with colorful flowers and gentle vines. The aroma of freshly baked croissants, ground coffee beans, and the distant sound of soft jazz music fills the air, creating an ambiance that makes one want to curl up with a book and forget the passage of time. The patrons, a mix of regulars and curious newcomers, seem to speak in hushed tones, as if not wanting to disturb the delicate tranquility of the place. Here, it feels as if the hustle and hurry of the world are miles away, and for a moment, time stands still, allowing one to simply be
@@ -353,9 +470,11 @@ try:
         #     eink_display.scroll_view_ratio(0.1 * i)
         #     time.sleep(1) 
 
-    # breakpoint()
-    # UI loop
+    else: # actual generation 
+        model_gen()
     
+    # --- geneation done, start the touch UI --- # 
+
     # GT_Development -- stores information about the current touch points
     gt = gt1151.GT1151()
     GT_Dev = gt1151.GT_Development()
@@ -368,8 +487,6 @@ try:
     t.start()
 
     while (1):
-        # emulate the chat app...
-        # if 1:
         gt.GT_Scan(GT_Dev, GT_Old)
         # dedup, avoid exposing repeated events to app
         if(GT_Old.X[0] == GT_Dev.X[0] and GT_Old.Y[0] == GT_Dev.Y[0] and GT_Old.S[0] == GT_Dev.S[0]):
@@ -390,7 +507,7 @@ try:
             
             # if touchy < eink_display.yres // 4:
             if touchy < eink_display.yres // 2:
-                if touchs <= 40: # light touch
+                if touchs <= 50: # light touch
                     print("scrolling up...")
                     eink_display.scroll_view(eink_display.scroll_offset - 10)
                 else: 
@@ -398,7 +515,7 @@ try:
                     eink_display.scroll_view_ratio(0)
             # if touchy > eink_display.yres * 3 // 4:
             if touchy > eink_display.yres // 2:
-                if touchs <= 40:
+                if touchs <= 50:
                     print("scrolling down...")
                     eink_display.scroll_view(eink_display.scroll_offset + 10)
                 else:
@@ -424,111 +541,7 @@ except KeyboardInterrupt:
     t.join()           # wait for touch thread to quit
     eink_display.epd.Dev_exit()
     exit()
-###### 
 
-# rva
-# model_path='/scratch/xl6yq/data/models/RWKV-5-World-0.1B-v1-20230803-ctx4096'
-
-# official
-# model_path='/data/models/RWKV-5-World-0.1B-v1-20230803-ctx4096' # official, NB it's v1
-# model_path='/data/models/pi-deployment/RWKV-5-World-0.4B-v2-20231113-ctx4096'
-
-# .1B 16x, deeply compressed 
-# model_path='/data/models/01b-pre-x59-16x-901'
-
-#v5.9
-# model_path='/data-xsel02/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/rwkv-init'   #unmodified model,  pretrained by us 
-# model_path='/data-xsel02/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01B-relu-diag-pretrain/rwkv-25'
-# model_path='/data-xsel02/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01B-relu-diag-pretrain/rwkv-35'
-
-# model_path='/data-xsel02/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/run1/rwkv-7'  # old
-# model_path='/data-xsel02/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/rwkv-init'
-# model_path='/data-xsel02/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/run2/rwkv-24'  #Only head.l1 tuned
-
-# model_path='/data/models/0.1b-pre-x59-16x-1451'
-# model_path='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-pretrain-x59/from-hpc/rwkv-976'
-
-model_path='/data/models/pi-deployment/01b-pre-x52-1455'
-# model_path='/data/models/pi-deployment/01b-pre-x58-512'
-
-print(f'Loading model - {model_path}')
-
-# xzl: for strategy, cf: https://pypi.org/project/rwkv/ for more ex
-#
-# Strategy Examples: (device = cpu/cuda/cuda:0/cuda:1/...)
-# 'cpu fp32' = all layers cpu fp32
-# 'cuda fp16' = all layers cuda fp16
-# 'cuda fp16i8' = all layers cuda fp16 with int8 quantization
-# 'cuda fp16i8 *10 -> cpu fp32' = first 10 layers cuda fp16i8, then cpu fp32 (increase 10 for better speed)
-# 'cuda:0 fp16 *10 -> cuda:1 fp16 *8 -> cpu fp32' = first 10 layers cuda:0 fp16, then 8 layers cuda:1 fp16, then cpu fp32
-#
-# Use '+' for STREAM mode, which can save VRAM too, and it is sometimes faster
-# 'cuda fp16i8 *10+' = first 10 layers cuda fp16i8, then fp16i8 stream the rest to it (increase 10 for better speed)
-# 'cuda fp16i8 *0+ -> cpu fp32 *1' = stream all layers cuda fp16i8, last 1 layer [ln_out+head] cpu fp32
-
-if os.environ["RWKV_CUDA_ON"] == '1':
-    strategy='cuda fp16'
-    # strategy='cuda fp16i8',
-else:
-    if is_amd_cpu():
-        strategy='cpu fp32'  # amd cpu lacks hard fp16...
-    else:
-        strategy='cpu fp16'
-    # strategy='cpu fp16i8'
-
-# use below to quantize model & save
-if False: 
-    strategy_token = strategy.split()[1]
-    basename, extension = os.path.splitext(os.path.basename(model_path))
-    save_path = os.path.join(os.path.dirname(model_path), f"{basename}_{strategy_token}{extension}")
-    print(f'Save path: {save_path}')
-    model = RWKV(model=model_path, strategy=strategy, verbose=True, convert_and_save_and_exit=save_path)
-    sys.exit(0)
-
-t0 = time.time()
-model = RWKV(model=model_path, 
-             strategy=strategy, 
-             verbose=True)
-#              head_K=200, load_token_cls='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/from-hpc/rwkv-823-cls.npy')
-
-pipeline = PIPELINE(model, "rwkv_vocab_v20230424")
-
-# ex prompt from paper: https://arxiv.org/pdf/2305.07759
-# ctx = "\nWhat is the sum of 123 and 456"
-# ctx = "\nElon Musk has"
-ctx = "\nUniversity of Virginia is"
-# ctx = u"\n我们认为"
-# ctx = "\nAlice was so tired when she got back home so she went"
-# ctx = "\nLily likes cats and dogs. She asked her mom for a dog and her mom said no, so instead she asked"
-# ctx = "\nOnce upon a time there was a little girl named Lucy"
-print(ctx, end='')
-
-def my_print(s):
-    print(s, end='', flush=True)
-
-eink_display.print_token_scroll(ctx.replace('\n', ''))
-
-t1 = time.time()
-
-# For alpha_frequency and alpha_presence, see "Frequency and presence penalties":
-# https://platform.openai.com/docs/api-reference/parameter-details
-
-args = PIPELINE_ARGS(temperature = 1.0, top_p = 0.7, top_k = 100, # top_k = 0 then ignore
-                     alpha_frequency = 0.25,
-                     alpha_presence = 0.25,
-                     alpha_decay = 0.996, # gradually decay the penalty
-                     token_ban = [0], # ban the generation of some tokens
-                     token_stop = [], # stop generation whenever you see any token here
-                     chunk_len = 256) # split input into chunks to save VRAM (shorter -> slower)
-
-TOKEN_CNT = 100 
-pipeline.generate(ctx, token_count=TOKEN_CNT, args=args, callback=eink_display.print_token_scroll)
-print('\n')
-t2 = time.time()
-print(f"model build: {(t1-t0):.2f} sec, exec {TOKEN_CNT} tokens in {(t2-t1):.2f} sec, {TOKEN_CNT/(t2-t1):.2f} tok/sec")
-
-eink_display.print_token_scroll('■                                ')
-time.sleep(1) # wait for the last screen to be rendered
 
 eink_display.epd.sleep()
 eink_display.stop()
