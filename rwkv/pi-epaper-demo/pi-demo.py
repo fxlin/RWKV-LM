@@ -358,6 +358,8 @@ prompt_list = [
     "\nWhat is the sum of 123 and 456",
     "\nElon Musk has",
     u"\n我们认为",
+    # In a forest, there lived a cute rabbit named Tarou
+    u"\nある森に、一匹のかわいいウサギが住んでいました",
     "\nAlice was so tired when she got back home so she went",
     # "\nLily likes cats and dogs. She asked her mom for a dog and her mom said no, so instead she asked",
     # "\nOnce upon a time there was a little girl named Lucy",
