@@ -57,6 +57,16 @@ try:
     t.setDaemon(True)
     t.start()
 
+    '''
+     five buttons on bottom: 
+    x,y ~=
+    25,110
+    80,110
+    135,110
+    180,110
+    235,110
+    '''
+
     while (1):
         gt.GT_Scan(GT_Dev, GT_Old)
 
@@ -65,17 +75,19 @@ try:
             continue
 
         if(GT_Dev.TouchpointFlag):
-            # tr_new=transpose_touchpoints(GT_Dev)
-            # tr_old=transpose_touchpoints(GT_Old)
-            # print(f"tr_new GT_Dev.X[0]: {tr_new.X[0]}, tr_new GT_Dev.Y[0]: {tr_new.Y[0]}, tr_new GT_Dev.S[0]: {tr_new.S[0]}")
+            GT_Dev.TouchpointFlag = 0
 
-            transpose_touch_inplace(GT_Dev)
-            transpose_touch_inplace(GT_Old)
+            tr_new=transpose_touch(GT_Dev)
+            tr_old=transpose_touch(GT_Old)
+            print(f"tr_new GT_Dev.X[0]: {tr_new.X[0]}, tr_new GT_Dev.Y[0]: {tr_new.Y[0]}, tr_new GT_Dev.S[0]: {tr_new.S[0]}")
+
+            # transpose_touch_inplace(GT_Dev)
+            # transpose_touch_inplace(GT_Old)
 
             # meaning touch event ready to be read out
-            if(GT_Dev.TouchpointFlag):
-                GT_Dev.TouchpointFlag = 0
-                print(f"touch ev GT_Dev.X[0]: {GT_Dev.X[0]}, GT_Dev.Y[0]: {GT_Dev.Y[0]}, GT_Dev.S[0]: {GT_Dev.S[0]}")
+            # if(GT_Dev.TouchpointFlag):
+            #     GT_Dev.TouchpointFlag = 0
+            #     print(f"touch ev GT_Dev.X[0]: {GT_Dev.X[0]}, GT_Dev.Y[0]: {GT_Dev.Y[0]}, GT_Dev.S[0]: {GT_Dev.S[0]}")
 
 except IOError as e:
     print("io error")

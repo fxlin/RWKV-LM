@@ -44,6 +44,7 @@ import logging
 # from waveshare_epd import epd2in13_V4  # old lib, conflicts with TP_lib for GPIO pins
 from TP_lib import epd2in13_V4, gt1151
 from PIL import Image,ImageDraw,ImageFont
+import random
 
 class EInkDisplay:
     def __init__(self, picdir):
@@ -71,7 +72,7 @@ class EInkDisplay:
 
         self.hard_reset()
         self.clear_text_area(True)
-        self.reset_position()
+        # self.reset_position()
 
         # Create a lock and condition for the display thread
         self.display_lock = threading.Lock()
@@ -83,9 +84,9 @@ class EInkDisplay:
         self.display_thread = threading.Thread(target=self.display_update_worker)
         self.display_thread.start()
 
-    def reset_position(self):
-        self.y_position = self.margin
-        self.x_position = self.margin
+    # def reset_position(self):
+    #     self.y_position = self.margin
+    #     self.x_position = self.margin
 
     def clear_text_area(self, update=False):
         # blank "base image" (background)
@@ -112,6 +113,10 @@ class EInkDisplay:
         self.scroll_offset = 0   # in pixel
         self.max_y_position = 0  # Track the maximum y_position that has ever been rendered
 
+        # reset_position
+        self.y_position = self.margin
+        self.x_position = self.margin
+
     def hard_reset(self):
         # Initialize the e-ink display
         self.epd = epd2in13_V4.EPD()
@@ -128,8 +133,8 @@ class EInkDisplay:
     def print_token_scroll(self, token):
         # preprocess... 
         token = token.replace('  ', ' ')  # two spaces as one
-        token = token.replace(' \n', ' ')  # space+newline as one space
-        token = token.replace('\n\n', '■')
+        # token = token.replace(' \n', ' ')  # space+newline as one space
+        # token = token.replace('\n\n', '■')
         
         need_update = False
 
@@ -167,7 +172,10 @@ class EInkDisplay:
         self.scroll_offset = max(0, self.y_position + self.text_height - self.ymax)
 
         # Update the base image by cropping the relevant part of the text image
+        # t0=time.time()
         self.update_viewport(self.scroll_offset)
+        # t1=time.time()
+        # print(f"update_viewport time: {(t1-t0):.4f} seconds")
 
         # print("xpos:", self.x_position, "ypos:", self.y_position)
 
@@ -230,7 +238,7 @@ class EInkDisplay:
         progress_bar_width = 3  # Width of the progress bar
         progress_bar_height = int(self.ymax * progress)     # calculated height of the progress bar (per progress
         self.base_draw.rectangle((self.xmax - progress_bar_width, 0, self.xmax, self.ymax), fill=255)  # Clear previous progress bar
-        print(f"scroll_offset {scroll_offset} max_y_position {self.max_y_position} ymax {self.ymax} progress: {progress}, height: {progress_bar_height}")
+        # print(f"scroll_offset {scroll_offset} max_y_position {self.max_y_position} ymax {self.ymax} progress: {progress}, height: {progress_bar_height}")
         self.base_draw.rectangle((self.xmax - progress_bar_width, 0, self.xmax, progress_bar_height), fill=0)  # Draw new progress bar
 
         '''
@@ -342,10 +350,24 @@ class EInkDisplay:
             self.display_condition.notify()
         self.display_thread.join()
 
+###############  the model invoker #####################
 
-def model_gen(prompt=None):
-    # model_path='/data/models/pi-deployment/01b-pre-x52-1455'
-    model_path='/data/models/pi-deployment/04b-pre-x59-2405'  # <--- works for demo
+# ex prompt from paper: https://arxiv.org/pdf/2305.07759
+prompt_list = [
+    "\nUniversity of Virginia is",
+    "\nWhat is the sum of 123 and 456",
+    "\nElon Musk has",
+    u"\n我们认为",
+    "\nAlice was so tired when she got back home so she went",
+    # "\nLily likes cats and dogs. She asked her mom for a dog and her mom said no, so instead she asked",
+    # "\nOnce upon a time there was a little girl named Lucy",
+]
+
+current_prompt = prompt_list[0]
+pipeline=None
+
+def model_load(model_path):
+    global pipeline
 
     print(f'Loading model - {model_path}')
 
@@ -366,7 +388,16 @@ def model_gen(prompt=None):
     #              head_K=200, load_token_cls='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/from-hpc/rwkv-823-cls.npy')
 
     pipeline = PIPELINE(model, "rwkv_vocab_v20230424")
+    t1 = time.time()
 
+    print(f"model build: {(t1-t0):.2f} sec")
+
+# debubgging
+def my_print(s):
+    print(s, end='', flush=True)
+
+def model_gen(prompt=None, print_prompt=False):
+    global pipeline
     if not prompt:
         # ex prompt from paper: https://arxiv.org/pdf/2305.07759
         # ctx = "\nWhat is the sum of 123 and 456"
@@ -383,12 +414,8 @@ def model_gen(prompt=None):
     # def my_print(s):
     #     print(s, end='', flush=True)
 
-    eink_display.print_token_scroll(ctx.replace('\n', ''))
-
-    t1 = time.time()
-
-    # For alpha_frequency and alpha_presence, see "Frequency and presence penalties":
-    # https://platform.openai.com/docs/api-reference/parameter-details
+    if print_prompt:
+        eink_display.print_token_scroll(ctx.replace('\n', ''))
 
     args = PIPELINE_ARGS(temperature = 1.0, top_p = 0.7, top_k = 100, # top_k = 0 then ignore
                         alpha_frequency = 0.25,
@@ -397,12 +424,14 @@ def model_gen(prompt=None):
                         token_ban = [0], # ban the generation of some tokens
                         token_stop = [], # stop generation whenever you see any token here
                         chunk_len = 256) # split input into chunks to save VRAM (shorter -> slower)
-
+    
+    t1 = time.time()
     TOKEN_CNT = 100 
     pipeline.generate(ctx, token_count=TOKEN_CNT, args=args, callback=eink_display.print_token_scroll)
+    # pipeline.generate(ctx, token_count=TOKEN_CNT, args=args, callback=my_print)
     print('\n')
     t2 = time.time()
-    print(f"model build: {(t1-t0):.2f} sec, exec {TOKEN_CNT} tokens in {(t2-t1):.2f} sec, {TOKEN_CNT/(t2-t1):.2f} tok/sec")
+    print(f"exec {TOKEN_CNT} tokens in {(t2-t1):.2f} sec, {TOKEN_CNT/(t2-t1):.2f} tok/sec")
 
     eink_display.print_token_scroll('■                                ')
     time.sleep(1) # wait for the last screen to be rendered
@@ -422,6 +451,7 @@ def pthread_irq() :
             GT_Dev.Touch = 1
         else :
             GT_Dev.Touch = 0
+        time.sleep(0.1)     # 100 ms too much?
     print("thread:exit")
 
 # transpose the touch x-y to be same as the display x-y
@@ -445,6 +475,14 @@ def transpose_touch(GT_dev, xres):
 # cf: https://www.waveshare.com/wiki/2.13inch_Touch_e-Paper_HAT_Manual#Touch_Driver (for C) 
 picdir = './pic'  
 eink_display = EInkDisplay(picdir)
+
+# load model, slow.. may be preloaded in the future
+model_path='/data/models/pi-deployment/01b-pre-x52-1455'
+# model_path='/data/models/pi-deployment/04b-pre-x59-2405'  # <--- works for demo
+model_load(model_path)
+
+# test model....
+# model_gen(print_prompt=True)
 
 try: 
     # emu only 
@@ -470,8 +508,8 @@ try:
         #     eink_display.scroll_view_ratio(0.1 * i)
         #     time.sleep(1) 
 
-    else: # actual generation 
-        model_gen()
+    # else: # actual generation 
+    #     model_gen()
     
     # --- geneation done, start the touch UI --- # 
 
@@ -485,6 +523,10 @@ try:
     t = threading.Thread(target = pthread_irq)
     t.setDaemon(True)
     t.start()
+
+    # show the initial prompt
+    current_prompt = random.choice(prompt_list)
+    eink_display.print_token_scroll(current_prompt.replace('\n', ''))
 
     while (1):
         gt.GT_Scan(GT_Dev, GT_Old)
@@ -505,23 +547,37 @@ try:
             touchx,touchy,touchs = touchnew.X[0], touchnew.Y[0], touchnew.S[0]
             # print(f"touch ev touchx {touchx}, touchy {touchy}, touchs {touchs}")
             
-            # if touchy < eink_display.yres // 4:
-            if touchy < eink_display.yres // 2:
+            # Buttons for the UI
+            # bottom-left corner, 35x35 button, "reload prompt"
+            if touchx < 35 and touchy > eink_display.yres - 35:
+                print("reload")
+                eink_display.clear_text_area(False)
+                current_prompt = random.choice(prompt_list)
+                eink_display.print_token_scroll(current_prompt.replace('\n', ''))
+            # center x,y ~= 80,120
+            if touchx > 70 and touchx < 90 and touchy > 110:
+                print("gen")
+                model_gen(current_prompt)
+            
+            # scroll controls 
+            # top-right corner
+            elif touchx > eink_display.yres *7//8 and touchy < eink_display.yres // 2:
                 if touchs <= 50: # light touch
-                    print("scrolling up...")
+                    # print("scrolling up...")
                     eink_display.scroll_view(eink_display.scroll_offset - 10)
                 else: 
-                    print("scrolling to top...")
+                    # print("scrolling to top...")
                     eink_display.scroll_view_ratio(0)
-            # if touchy > eink_display.yres * 3 // 4:
-            if touchy > eink_display.yres // 2:
+            # bottom-right corner
+            elif touchx > eink_display.yres *7//8 and touchy > eink_display.yres // 2:
                 if touchs <= 50:
-                    print("scrolling down...")
+                    # print("scrolling down...")
                     eink_display.scroll_view(eink_display.scroll_offset + 10)
                 else:
-                    print("scrolling to bottom...")
+                    # print("scrolling to bottom...")
                     eink_display.scroll_view_ratio(1.0)
             
+
     eink_display.stop()
     eink_display.epd.sleep()
     # dbg: Save the text image as a bmp file
