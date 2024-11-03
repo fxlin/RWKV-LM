@@ -15,8 +15,7 @@ import time
 from rwkv.model import RWKV
 from rwkv.utils import PIPELINE, PIPELINE_ARGS
 from rwkv.arm_plat import is_amd_cpu
-
-import os
+import threading
 
 
 # run chat app on the inference engine (rwkv), check for sanity 
@@ -69,6 +68,16 @@ class EInkDisplay:
         self.clear_text_area(True)
         self.reset_position()
 
+        # Create a lock and condition for the display thread
+        self.display_lock = threading.Lock()
+        self.display_condition = threading.Condition(self.display_lock)
+        self.display_buffer = None
+        self.stop_thread = False
+
+        # Start the display update thread
+        self.display_thread = threading.Thread(target=self.display_update_worker)
+        self.display_thread.start()
+
     def reset_position(self):
         self.y_position = self.margin
         self.x_position = self.margin
@@ -102,13 +111,16 @@ class EInkDisplay:
         end_time = time.time()  # End measuring time
         print(f"Clr time: {end_time - start_time:.4f} seconds")
 
-    # NB: token from rwkv contains a leading (?) space already
+    # NB: (some) tokens from rwkv contains a leading (?) space already
     def print_token_scroll(self, token):
         # preprocess... 
-        token = token.replace('  ', ' ')
+        token = token.replace('  ', ' ')  # two spaces as one
+        token = token.replace(' \n', ' ')  # space+newline as one space
         token = token.replace('\n\n', '■')
         
-        need_upate = False
+        need_update = False
+
+        print(f"print_token_scroll() token: [{token}]")
 
         # text_width = self.font_text.getlength(token + " ")
         _, _, text_width, _ = self.font_text.getbbox(token)
@@ -116,7 +128,7 @@ class EInkDisplay:
         if self.x_position + text_width > self.xmax:
             self.x_position = self.margin
             self.y_position += self.row_height
-            need_upate = True
+            need_update = True
 
         if self.y_position + self.text_height > self.ymax:    # hit the bottom of the text area
             # self.reset_position()
@@ -128,7 +140,7 @@ class EInkDisplay:
             # Fill the region of the bottom row with white
             self.base_draw.rectangle((0, self.ymax - self.row_height, self.xmax, self.ymax), fill=255)
             self.base_draw = ImageDraw.Draw(self.base_image)
-            need_upate = True
+            need_update = True
 
         # Draw the token on the base image
         self.base_draw.text((self.x_position, self.y_position), token, font=self.font_text, fill=0)
@@ -138,14 +150,48 @@ class EInkDisplay:
 
         # print("xpos:", self.x_position, "ypos:", self.y_position)
 
-        if need_upate:
-            # Update the e-ink display with the new token using partial update
-            # start_time = time.time()  # Start measuring time
-            # takes ~0.6 sec...
-            buffer = self.epd.getbuffer(self.base_image)
+        if need_update:
+            # print("try to update display...")
+            with self.display_condition:
+                # Update the e-ink display with the new token using partial update
+                # start_time = time.time()  # Start measuring time
+                # takes ~0.6 sec...
+                # buffer = self.epd.getbuffer(self.base_image)
+                # self.epd.displayPartial(buffer)
+                # end_time = time.time()  # End measuring time
+                # print(f"Token display time: {end_time - start_time:.4f} seconds")
+
+                self.display_buffer = self.base_image.copy()
+                self.display_condition.notify()
+
+    def display_update_worker(self):
+        print("Display update worker started")
+        while True:
+            with self.display_condition:
+                # Wait for a new buffer to be available
+                while self.display_buffer is None and not self.stop_thread:
+                    self.display_condition.wait()
+
+                if self.stop_thread:
+                    break
+
+                # Get the buffer and clear it for the next update
+                buffer_to_display = self.display_buffer
+                self.display_buffer = None
+
+            # print("Displaying buffer...")
+            # Update the e-ink display with the new buffer using partial update
+            # creates a byte array buffer that the e-ink driver can use to perform the partial update on the display
+            buffer = self.epd.getbuffer(buffer_to_display)
             self.epd.displayPartial(buffer)
-            # end_time = time.time()  # End measuring time
-            # print(f"Token display time: {end_time - start_time:.4f} seconds")
+            # print("done")
+
+    def stop(self):
+        # Stop the display update thread
+        with self.display_condition:
+            self.stop_thread = True
+            self.display_condition.notify()
+        self.display_thread.join()
 
     # print token, update per line (roughly)
     # clear the page when full, and restart from top
@@ -160,7 +206,7 @@ class EInkDisplay:
         # preprocess... 
         token = token.replace('\n\n', '■')
         
-        need_upate = False
+        need_update = False
 
         # text_width = self.font_text.getlength(token + " ")
         _, _, text_width_nospace, _ = self.font_text.getbbox(token)
@@ -169,12 +215,12 @@ class EInkDisplay:
         if self.x_position + text_width_nospace > self.xmax:
             self.y_position += self.row_height
             self.x_position = self.margin
-            need_upate = True       # a new line starts, refresh
+            need_update = True       # a new line starts, refresh
 
         if self.y_position + self.text_height > self.ymax:
             self.clear_text_area()
             self.reset_position()
-            need_upate = True
+            need_update = True
 
         # Draw the token on the base image
         self.base_draw.text((self.x_position, self.y_position), token, font=self.font_text, fill=0)
@@ -182,7 +228,7 @@ class EInkDisplay:
         # Update the x_position for the next word
         self.x_position += text_width
 
-        if need_upate:
+        if need_update:  # async, notify the display thread ... 
             # Update the e-ink display with the new token using partial update
             # start_time = time.time()  # Start measuring time
             # takes ~0.6 sec...
@@ -203,6 +249,9 @@ if 0:
         # eink_display.print_token(token)
         eink_display.print_token_scroll(' ' + token)
         # no delay
+    eink_display.print_token_scroll('■                                ')
+    eink_display.stop()        
+    eink_display.epd.sleep()
     sys.exit(0)
 ###### 
 
@@ -228,13 +277,13 @@ if 0:
 # model_path='/data/models/0.1b-pre-x59-16x-1451'
 # model_path='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-pretrain-x59/from-hpc/rwkv-976'
 
-# model_path='/data/models/pi-deployment/01b-pre-x52-1455'
+model_path='/data/models/pi-deployment/01b-pre-x52-1455'
 # model_path='/data/models/pi-deployment/01b-pre-x58-512'
 
 # model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
 # model_path='/data/models/pi-deployment/01b-pre-x59-976'
 # model_path='/data/models/pi-deployment/04b-tunefull-x58-562'
-model_path='/data/models/pi-deployment/04b-pre-x59-2405'
+# model_path='/data/models/pi-deployment/04b-pre-x59-2405'  # <--- works for demo
 
 # model_path='/data/models/rwkv-04b-pre-x59-860'
 
@@ -328,8 +377,8 @@ TOKEN_CNT = 100
 pipeline.generate(ctx, token_count=TOKEN_CNT, args=args, callback=eink_display.print_token_scroll)
 print('\n')
 t2 = time.time()
+print(f"model build: {(t1-t0):.2f} sec, exec {TOKEN_CNT} tokens in {(t2-t1):.2f} sec, {TOKEN_CNT/(t2-t1):.2f} tok/sec")
 
 eink_display.print_token_scroll('■                                ')
 eink_display.epd.sleep()
-
-print(f"model build: {(t1-t0):.2f} sec, exec {TOKEN_CNT} tokens in {(t2-t1):.2f} sec, {TOKEN_CNT/(t2-t1):.2f} tok/sec")
+eink_display.stop()
