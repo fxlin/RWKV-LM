@@ -19,6 +19,11 @@ export RWKVDATA=/data/rwkv-data
 export RWKV_CUDA_ON=0
 export RWKV_NEON_ON=1
 
+if grep -q "OrangePi Zero2" /proc/device-tree/model; then
+    export RWKV_NEON_ON=0
+fi
+
+
 # should do "pip install -e ." instead? 
 export PYTHONPATH=$PYTHONPATH:${HOME}/workspace-rwkv/RWKV-LM
 
