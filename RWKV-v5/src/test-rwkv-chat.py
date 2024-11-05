@@ -192,7 +192,8 @@ x59     01b-pre-x59-976         15.02 (old: 10.5
     04b-pre-x59-2405           6.86         (old -- 3.36 (not too bad
     fp16i8 v3                           (old -- 3.0 (not too bad)
 
-1b5        OOM
+1b5  1b5-pre-x59-929   (on rpi5 8GB RAM) 3 tok/s
+
 
 --------------
 rpi4  (BCM2711, quad Cortex-A72, 1.5GHz, 8GB)
