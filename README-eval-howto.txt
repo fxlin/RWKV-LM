@@ -1,4 +1,4 @@
-=== Prep
+== Prep
 Clone this repo
 create a conda environment called "rwkv", install needed packages (via pip).
 IMPORTANT: use Python3.10
@@ -35,6 +35,33 @@ cp ../../template/*.sh .
 ./submit-eval.sh
 Results will be written to eval_log.txt, eval_log.png
 
+
+=== Run our models (x59)
+```
+# load our model
+model_path = /path/to/your/model.pth
+
+# load clustered tokens
+cls_path = /path/to/your/cls.npy
+
+# enable quantization predictor
+quant_bit = bit # 1/2/4/8 bit
+quant_map = [threshold1, threshold2, ...] # len(quant_map) == # of layers
+
+# enable mlp predictor
+mlp_map = [threshold1, threshold2, ...]  # len(mlp_map) == # of layers
+
+# ex1) 1-bit quantization for 0.1B & MLP predictors
+quant_bit = 1
+quant_map = [0.9] * 12
+mlp_map = [0.7] * 12
+
+
+model = RWKV(model=model_path, strategy="cuda fp16", verboase=isverbose,
+             quant_bit=quant_bit, quant_map=quant_map,
+             mlp_map=mlp_map,
+             load_token_cls=cls_path)
+```
 
 Troubleshooting
 ===============
