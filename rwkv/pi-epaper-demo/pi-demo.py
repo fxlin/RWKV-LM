@@ -13,13 +13,18 @@ https://chatgpt.com/share/6722e34c-c920-8004-a2c2-0a99a4ecee00
 
 '''
 import sys, os, psutil
-import time
+import time, copy
 
 from rwkv.model import RWKV
 from rwkv.utils import PIPELINE, PIPELINE_ARGS
 from rwkv.arm_plat import is_amd_cpu
 import threading
 
+######## choice of models #############
+# model_path='/data/models/pi-deployment/01b-pre-x52-1455'
+# model_path='/data/models/pi-deployment/04b-pre-x59-2405'  # <--- works for demo
+model_path='/data/models/pi-deployment/04b-pre-x59-860'  # <--- works for demo
+#######################################
 
 # run chat app on the inference engine (rwkv), check for sanity 
 # xzl: use our own version of lm_eval, rwkv
@@ -35,6 +40,15 @@ if os.environ.get("RWKV_JIT_ON") != '0':
 
 if os.environ.get('RWKV_CUDA_ON') != '0':
     os.environ["RWKV_CUDA_ON"] = '1' #default
+
+
+###########
+# global vars, written by main thread (e.g. during model_gen()), 
+# read by UI thread (e.g. system info renderer)
+the_sys_msg = ""          # status msg 
+the_tok_persec = 0.0       # token per sec
+# XXX lock them, oh well....
+
 
 ###########
 # epaper display (epd)
@@ -66,7 +80,7 @@ class EInkDisplay:
         self.font_title = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), size=24)
 
         # calculate row height ... 1.5x of text height
-        left, top, right, bottom,  = self.font_text.getbbox("A")
+        left, top, right, bottom  = self.font_text.getbbox("A")
         self.text_height = bottom - top
         self.row_height = self.text_height * 3 / 2
 
@@ -74,15 +88,26 @@ class EInkDisplay:
         self.clear_text_area(True)
         # self.reset_position()
 
+        # -- tok/s statistics -- #
+        self.last_ts = time.time()
+        self.token_cnt = 0  # token printed in the past period
+
         # Create a lock and condition for the display thread
         self.display_lock = threading.Lock()
         self.display_condition = threading.Condition(self.display_lock)
         self.display_buffer = None
         self.stop_thread = False
 
+        # Create a condition for the system info update thread
+        self.system_info_condition = threading.Condition()
+
         # Start the display update thread
         self.display_thread = threading.Thread(target=self.display_update_worker)
         self.display_thread.start()
+
+        # Start the system info update thread. periodically poll cpu/mem/tmp/speed and render to the menu bar
+        self.system_info_thread = threading.Thread(target=self.system_info_update_worker)
+        self.system_info_thread.start()
 
     # def reset_position(self):
     #     self.y_position = self.margin
@@ -95,7 +120,7 @@ class EInkDisplay:
         # self.base_draw.text((10, 10), "Title", font=self.font_title, fill=0)  # Draw the title at the top
 
         # image as background, the image file orientation will affect the coordinate system
-        self.base_image = Image.open(os.path.join(picdir, "2in13/Photo_2.bmp")).rotate(-90, expand=True)
+        self.base_image = Image.open(os.path.join(picdir, "2in13/Photo_2-3icon.bmp")).rotate(-90, expand=True)
 
         self.base_draw = ImageDraw.Draw(self.base_image)
         # self.base_image.paste(newimage, (0, 0))
@@ -131,6 +156,14 @@ class EInkDisplay:
 
     # NB: (some) tokens from rwkv contains a leading (?) space already
     def print_token_scroll(self, token):
+        # statistics 
+        self.token_cnt += 1
+        elpased = time.time() - self.last_ts
+        if elpased > 1: # count every 1 sec
+            post_tks(self.token_cnt / elpased)
+            self.token_cnt = 0
+            self.last_ts = time.time()
+
         # preprocess... 
         token = token.replace('  ', ' ')  # two spaces as one
         # token = token.replace(' \n', ' ')  # space+newline as one space
@@ -241,25 +274,89 @@ class EInkDisplay:
         # print(f"scroll_offset {scroll_offset} max_y_position {self.max_y_position} ymax {self.ymax} progress: {progress}, height: {progress_bar_height}")
         self.base_draw.rectangle((self.xmax - progress_bar_width, 0, self.xmax, progress_bar_height), fill=0)  # Draw new progress bar
 
-        '''
-        # Draw per core CPU utilization for cores 0-3 in a 2x2 grid
-        cpu_usages = psutil.cpu_percent(percpu=True)[:4]
-        grid_x_start = self.xres - 30  # Bottom-right corner grid starting position
-        grid_y_start = self.yres - 30
-        grid_width = 15
-        grid_height = 15
-    
-        for i in range(2):
-            for j in range(2):
-                core_index = i * 2 + j
-                usage_text = f"{int(cpu_usages[core_index])}"  # Only print the integer usage value (0-99)
-                x_pos = grid_x_start + j * grid_width
-                y_pos = grid_y_start + i * grid_height
-                self.base_draw.rectangle((x_pos, y_pos, x_pos + grid_width, y_pos + grid_height), fill=255)  # Clear previous value
-                self.base_draw.text((x_pos + 2, y_pos + 2), usage_text, font=self.font_tiny, fill=0)  # Draw CPU usage
-        '''
+        # Copy the base_image buffer for the display thread
+        with self.display_condition:
+            self.display_buffer = self.base_image.copy()
+            self.display_condition.notify()
 
-        # Draw system information in a 2x2 grid
+    ################ the worker thread: for system info rendering  ################
+
+    def system_info_update_worker(self):
+        global the_tok_persec, the_sys_msg
+        
+        while not self.stop_thread:
+            with self.system_info_condition:
+                '''
+                # Wait for notification or timeout
+                if self.system_info_condition.wait(timeout=1):
+                    # we have the lock, copy the global vars
+                    tok_persec = the_tok_persec
+                    sys_msg = copy.deepcopy(the_sys_msg)
+                else: 
+                    # we timeout, no new info, use the stale info 
+                    #  (need to do this??) 
+                    #   with self.system_info_condition:
+                    # we dont have lock. need to grab
+                    tok_persec = the_tok_persec
+                    sys_msg = copy.deepcopy(the_sys_msg)
+                '''
+                # if we timeout, we may not have lock for the global vars
+                # the intention is to use the stale values. (how?)
+                # below goes w/o lock, for simplicity ... there's a race condition: 
+                # (see above) TBD...
+                self.system_info_condition.wait(timeout=1)
+                tok_persec = the_tok_persec
+                sys_msg = copy.deepcopy(the_sys_msg)                
+            # lock released, now draw
+            self.draw_system_info(tok_persec, sys_msg)
+            if self.stop_thread:
+                break
+
+    # called by the "system info" thread, to render the sys info on the menu bar. 
+    # b/c the menu bar area is disjoint vs. the text area, no lock needed vs. update_viewport()
+    def draw_system_info(self, token_per_sec, sys_msg):
+        # print(f"draw sys info....{token_per_sec:.0f} tok/s, {sys_msg}")
+
+        # Draw system information in a defined rectangle
+        rect_x_start = 130  # Top-left x-coordinate
+        rect_y_start = self.yres - 30  # Top-left y-coordinate
+        rect_x_end = self.xres  # Bottom-right x-coordinate
+        rect_y_end = self.yres  # Bottom-right y-coordinate
+
+        # Number of characters that can fit in the system info area        
+        left, top, right, bottom = self.font_tiny.getbbox("A")
+        text_width = right - left
+        info_text_bottom_len = (rect_x_end - rect_x_start) // text_width   # XXX why under-estimate?
+        info_text_bottom_len += 4  # dirty fix....
+
+        # Clear the previous system info area
+        self.base_draw.rectangle((rect_x_start, rect_y_start, rect_x_end, rect_y_end), fill=255)
+
+        # Row 0: Display the_tok_persec, CPU util, temperature, and memory usage
+        tok_persec = f"{token_per_sec:.0f}".ljust(2)
+        info_text_bottom = sys_msg[:info_text_bottom_len]   # copy, truncated to fit the area
+            
+        cpu_usage = f"{psutil.cpu_percent():.0f}%".rjust(3)
+        cpu_temp = f"{self.get_cpu_temperature():.0f}C".rjust(3)
+        process = psutil.Process(os.getpid())
+        mem_usage_str = self.format_memory_size(process.memory_info().rss).rjust(4)
+
+        info_text_top = f"{tok_persec} tks {cpu_usage} {cpu_temp} {mem_usage_str}"
+        self.base_draw.text((rect_x_start + 2, rect_y_start + 2), info_text_top, font=self.font_tiny, fill=0)
+
+        # Row 1: Display the_sys_msg        
+        self.base_draw.text((rect_x_start + 2, rect_y_start + 15), info_text_bottom, font=self.font_tiny, fill=0)
+
+        # useful dbg info
+        # print(f"draw sys info: {info_text_top}, {info_text_bottom}")
+
+        # Copy the base_image buffer for the display thread
+        with self.display_condition:
+            self.display_buffer = self.base_image.copy()
+            self.display_condition.notify()
+
+        '''
+        # Draw system information in a 2x2 grid, on bottom-right of the whole screen 
         grid_x_start = self.xres - 50  # Bottom-right corner grid starting position
         grid_y_start = self.yres - 30
         grid_width = 25
@@ -297,6 +394,7 @@ class EInkDisplay:
         with self.display_condition:
             self.display_buffer = self.base_image.copy()
             self.display_condition.notify()
+        '''
 
     # rapsi 
     def get_cpu_temperature(self):
@@ -317,6 +415,8 @@ class EInkDisplay:
             return f"{size_bytes // (1024 * 1024)}M"
         else:
             return f"{size_bytes / (1024 * 1024 * 1024):.1f}G"
+
+    ############ the worker thread: for refreshing the display (slow) ####################
 
     def display_update_worker(self):
         print("Display update worker started")
@@ -342,13 +442,15 @@ class EInkDisplay:
             self.epd.displayPartial_Wait(buffer)
             # end_time = time.time()  # End measuring time
             # print(f": {end_time - start_time:.2f} seconds")
-
+    
+    ############ stop all worker threads ####################
     def stop(self):
         # Stop the display update thread
         with self.display_condition:
             self.stop_thread = True
             self.display_condition.notify()
         self.display_thread.join()
+        self.system_info_thread.join()
 
 ###############  the model invoker #####################
 
@@ -369,9 +471,9 @@ current_prompt = prompt_list[0]
 pipeline=None
 
 def model_load(model_path):
-    global pipeline
-
+    global pipeline    
     print(f'Loading model - {model_path}')
+
 
     if os.environ["RWKV_CUDA_ON"] == '1':
         strategy='cuda fp16'
@@ -437,8 +539,10 @@ def model_gen(prompt=None, print_prompt=False):
 
     eink_display.print_token_scroll('■                                ')
     time.sleep(1) # wait for the last screen to be rendered
+    post_sys_msg(f"Done. {TOKEN_CNT}tk in {(t2-t1):.0f}s")
 
 ###############  touch device #####################
+TOUCH_POLL_INTERVAL = 0.1  # 100 ms
 
 flag_t = 1 
 # touch dev polling thread, set a flag showing if a touch even has occurred
@@ -446,14 +550,14 @@ flag_t = 1
 # below polling???
 # ::Touch will be examined by class code of GT1151::GT_scan()
 def pthread_irq() :
-    print("pthread running")    
+    print("touch dev poll thread: running")    
     while flag_t == 1 :
     # xzl: non blocking? inefficient...     
         if(gt.digital_read(gt.INT) == 0) :    
             GT_Dev.Touch = 1
         else :
             GT_Dev.Touch = 0
-        time.sleep(0.1)     # 100 ms too much?
+        time.sleep(TOUCH_POLL_INTERVAL)     # 100 ms too much?
     print("thread:exit")
 
 # transpose the touch x-y to be same as the display x-y
@@ -478,10 +582,25 @@ def transpose_touch(GT_dev, xres):
 picdir = './pic'  
 eink_display = EInkDisplay(picdir)
 
-# load model, slow.. may be preloaded in the future
-model_path='/data/models/pi-deployment/01b-pre-x52-1455'
-# model_path='/data/models/pi-deployment/04b-pre-x59-2405'  # <--- works for demo
-model_load(model_path)
+def post_tks(tks):
+    global the_tok_persec
+    with eink_display.system_info_condition:
+        the_tok_persec = tks
+        eink_display.system_info_condition.notify()
+
+def post_sys_msg(msg):
+    global the_sys_msg
+    with eink_display.system_info_condition:
+        the_sys_msg = msg
+        eink_display.system_info_condition.notify()
+        
+# load model, slow.. may be preloaded in the future        
+if os.environ.get("EMU") != '1':
+    post_sys_msg(f"Load {os.path.basename(model_path).replace('.pth', '')}")
+    model_load(model_path)
+    post_sys_msg(f"Model loaded")
+else: 
+    post_sys_msg(f"EMU mode")
 
 # test model....
 # model_gen(print_prompt=True)
@@ -530,7 +649,10 @@ try:
     current_prompt = random.choice(prompt_list)
     eink_display.print_token_scroll(current_prompt.replace('\n', ''))
 
+    # the main UI loop, touch event handling
     while (1):
+        time.sleep(TOUCH_POLL_INTERVAL)
+
         gt.GT_Scan(GT_Dev, GT_Old)
         # dedup, avoid exposing repeated events to app
         if(GT_Old.X[0] == GT_Dev.X[0] and GT_Old.Y[0] == GT_Dev.Y[0] and GT_Old.S[0] == GT_Dev.S[0]):
@@ -558,7 +680,8 @@ try:
                 eink_display.print_token_scroll(current_prompt.replace('\n', ''))
             # center x,y ~= 80,120
             if touchx > 70 and touchx < 90 and touchy > 110:
-                print("gen")
+                # print("gen")
+                post_sys_msg(f"Generating...")
                 model_gen(current_prompt)
             
             # scroll controls 
