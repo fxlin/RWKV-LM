@@ -126,7 +126,8 @@ pipeline = PIPELINE(model, "rwkv_vocab_v20230424")
 
 # ex prompt from paper: https://arxiv.org/pdf/2305.07759
 # ctx = "\nWhat is the sum of 123 and 456"
-ctx = "\nElon Musk has"
+# ctx = "\nElon Musk has"
+ctx = "\nUniversity of Virginia is"
 # ctx = "\nAlice was so tired when she got back home so she went"
 # ctx = "\nLily likes cats and dogs. She asked her mom for a dog and her mom said no, so instead she asked"
 # ctx = "\nOnce upon a time there was a little girl named Lucy"
