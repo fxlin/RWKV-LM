@@ -22,6 +22,8 @@ pip install spidev
 pip install gpiozero
 
 # partial, focus on touch features
+cd ~/workspace-waveshare/example
+source env-pi.sh
 python3 python/examples/TP2in13_V4_test.py
 
 
