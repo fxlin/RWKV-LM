@@ -118,6 +118,8 @@ create a big anon mapping, atop it, mmap the tensor file
 first mmap the big anon region, then mmap regions from the tensor file 
 initially, this is no rows are in core. 
 
+return: tensor, ptr to the mmap region (anon_mmap), mask (all 0s)
+
 cf load_tensor_with_anonymous_mapping_bench2()
 '''
 def sparsetensor_init(file_path, tensor_shape, dtype):
@@ -135,66 +137,90 @@ def sparsetensor_init(file_path, tensor_shape, dtype):
         mapped_tensor = mapped_tensor.view(tensor_shape)  # Reshape to the original tensor shape
 
         # mapped_tensor.data_ptr() should be the same as anon_mmap
-        return mapped_tensor, anon_mmap
+        return mapped_tensor, anon_mmap, torch.zeros(tensor_shape[0], dtype=torch.bool)
 
 '''
 take a tensor, unmap and remap its rows 
 old_mask, new_mask: each shape (D,) with 1s and 0s. 1 means in core. D=tensor_shape[0]
-do_unmap: if False, do not unmap rows not in new_mask (i.e keep all mapped rows)
+do_unmap: if False, do not unmap rows not in new_mask (i.e keep all already mapped rows)
 
-return: updated old_mask
+return: updated old_mask (the actual rows mapped/unmapped)
 cf: load_tensor_with_anonymous_mapping_bench3()
 '''
-def sparsetensor_remap(tensor, file_path, dtype, old_mask, new_mask, do_unmap=True):
+def sparsetensor_remap(tensor, file_path, old_mask, new_mask, do_unmap=True):    
     tensor_shape = tensor.shape
+    dtype = tensor.dtype
+
     anon_mmap = tensor.data_ptr()
     row_size_bytes = torch._utils._element_size(dtype) * tensor_shape[1]
 
-    with open(file_path, "r+b") as f:
-        prot = PROT_READ
-        flags = MAP_PRIVATE | MAP_FIXED
+    # Calculate the number of rows per page
+    page_size = mmap.PAGESIZE
+    rows_per_page = page_size // row_size_bytes
+    assert(page_size % row_size_bytes == 0)  # TBD 
 
-        # Prepare lists for addresses and offsets
-        addrlist = []       # mem addr within the tensor
-        offsetlist = []     # offsets within the file
+    # Calculate the number of pages
+    num_pages = (tensor_shape[0] + rows_per_page - 1) // rows_per_page
 
-        # 1 if new_mask has 1 (to map) on that idx but old_mask has 0 (unmapped)
-        tomap_mask = new_mask & ~old_mask
-        # 1 if new_mask has 0 (to unmap) on that idx but old_mask has 1 (mapped)
-        tounmap_mask = old_mask & ~new_mask
+    # Initialize page masks
+    old_pagemask = torch.zeros(num_pages, dtype=torch.bool)
+    new_pagemask = torch.zeros(num_pages, dtype=torch.bool)
 
-        for i in range(tensor_shape[0]):
-            if tomap_mask[i] == 1:
-                addrlist.append(anon_mmap + i * row_size_bytes)
-                offsetlist.append(i * row_size_bytes)
-        custom_mmap_batch(addrlist, row_size_bytes, prot, flags, offsetlist, f.fileno())
+    # Update page masks based on row masks
+    for i in range(num_pages):
+        start_row = i * rows_per_page
+        end_row = min((i + 1) * rows_per_page, tensor_shape[0])
+        old_pagemask[i] = old_mask[start_row:end_row].any()
+        new_pagemask[i] = new_mask[start_row:end_row].any()
 
-        # Unmap the rows that are no longer needed
-        if do_unmap:
-            addrlist = []
-            for i in range(tensor_shape[0]):
-                if tounmap_mask[i] == 1:
-                    addrlist.append(anon_mmap + i * row_size_bytes)
-            custom_unmap_batch(addrlist, row_size_bytes)
-            updated_mask = new_mask
-        else:
-            updated_mask = old_mask | new_mask
+    # 1 if new_pagemask has 1 (to map) on that idx but old_pagemask has 0 (unmapped)
+    tomap_pagemask = new_pagemask & ~old_pagemask
+    # 1 if new_pagemask has 0 (to unmap) on that idx but old_pagemask has 1 (mapped)
+    tounmap_pagemask = old_pagemask & ~new_pagemask
 
-    return updated_mask
+    # map pages 
+    if file_path:
+        with open(file_path, "r+b") as f:
+            prot = PROT_READ
+            flags = MAP_PRIVATE | MAP_FIXED
+
+            # Prepare lists for addresses and offsets
+            addrlist = []       # mem addr within the tensor
+            offsetlist = []     # offsets within the file
+
+            for i in range(num_pages):
+                if tomap_pagemask[i] == 1:
+                    addrlist.append(anon_mmap + i * page_size)
+                    offsetlist.append(i * page_size)
+            custom_mmap_batch(addrlist, page_size, prot, flags, offsetlist, f.fileno())
+
+    # Unmap pages
+    if do_unmap:
+        addrlist = []
+        for i in range(num_pages):
+            if tounmap_pagemask[i] == 1:
+                addrlist.append(anon_mmap + i * page_size)
+        custom_unmap_batch(addrlist, page_size)
+    else:
+        new_pagemask = old_pagemask | new_pagemask
+
+    # Update the row mask based on the new page mask
+    # old_mask = torch.zeros(tensor_shape[0], dtype=torch.bool)
+    for i in range(num_pages):
+        start_row = i * rows_per_page
+        end_row = min((i + 1) * rows_per_page, tensor_shape[0])
+        old_mask[start_row:end_row] = new_pagemask[i]
+
+    return old_mask
 
 '''
-revert a tensor to its initial state (a contig anon mapping)
+revert a tensor to its initial state (to a contig anon mapping)
+we cannot unmap every page (in or out of core), b/c that would unmap the anon region itself.
+
+return: updated mask
 '''
-def sparsetensor_clearmap(tensor):
-    tensor_shape = tensor.shape
-    anon_mmap = tensor.data_ptr()
-    row_size_bytes = torch._utils._element_size(tensor.dtype) * tensor_shape[1]
-
-    addrlist = []
-    for i in range(tensor_shape[0]):
-        addrlist.append(anon_mmap + i * row_size_bytes)
-    custom_unmap_batch(addrlist, row_size_bytes)
-
+def sparsetensor_clearmap(tensor, old_mask):
+    return sparsetensor_remap(tensor, None, old_mask, torch.zeros(old_mask.shape, dtype=torch.bool), do_unmap=True)
 
 ###############################################################################
 # test code
@@ -212,7 +238,7 @@ def create_random_tensor_and_save(file_path, shape, dtype=torch.float32):
     - None
     """
     # Create a tensor with the specified shape, data type, and fill it with a specific value
-    specific_value = 1.0  # You can change this value to whatever you need
+    specific_value = 42.0  # You can change this value to whatever you need
     random_tensor = torch.full(shape, specific_value, dtype=dtype)
     
     # Open the file in binary write mode and save the raw tensor data
@@ -225,28 +251,73 @@ def create_random_tensor_and_save(file_path, shape, dtype=torch.float32):
 if __name__ == "__main__":
 
     D=1024
+    
     # dtype = torch.float32  # Data type of the tensor elements
     dtype = torch.float16  # Data type of the tensor elements
     # dtype = torch.bfloat16  # need some special treatment ... TBD
-    tensor_shape = (4*D, D)  # Shape of the 2D tensor (rows, columns)
+    # tensor_shape = (4*D, D)  # Shape of the 2D tensor (rows, columns)
+    tensor_shape = (2*D, D)  # Shape of the 2D tensor (rows, columns)
     file_path = '/tmp/large_tensor_file.bin'  # Path to the tensor file
+
+    # Number of rows per page
+    group_size = 4096 // D // torch._utils._element_size(dtype)  
 
     # if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
     # Create a random tensor and save it to a binary file
     create_random_tensor_and_save(file_path, tensor_shape, dtype=dtype)
     print("created tensor file")
+    print(f"row size in bytes: {torch._utils._element_size(dtype) * tensor_shape[1]}")
 
     # Initialize the sparse tensor
-    tensor, anon_mmap = sparsetensor_init(file_path, tensor_shape, dtype)
+    tensor, anon_mmap, mask = sparsetensor_init(file_path, tensor_shape, dtype)
     print(f"tensor: {tensor.shape}, anon_mmap: {hex(anon_mmap)}")
 
     # Randomly generate a mask for the rows to map
-    mask = torch.randint(0, 2, (tensor_shape[0],), dtype=torch.bool)
+    newmask = torch.randint(0, 2, (tensor_shape[0],), dtype=torch.bool)
     print(f"mask: {mask}")
+
+    # Print a few mapped rows before remap
+    print("Mapped rows before remap:")
+    for i in range(min(5, tensor_shape[0])):
+        print(tensor[i])
+
+    mask_str = ''.join(['1' if x else '0' for x in newmask])
+    grouped_mask = [mask_str[i:i+group_size] for i in range(0, len(mask_str), group_size)]
+    print("requested Mask (grouped):")
+    for group in grouped_mask[:100]:
+        print(group, end=' ')
 
     # Remap the tensor rows according to the mask
-    mask = sparsetensor_remap(tensor, file_path, dtype, torch.zeros(tensor_shape[0], dtype=torch.bool), mask)
-    print(f"mask: {mask}")
+    mask = sparsetensor_remap(tensor, file_path, mask, newmask)
+
+    # Print a few mapped rows after remap
+    print("Mapped rows after remap:")
+    for i in range(min(5, tensor_shape[0])):
+        print(newmask[i], tensor[i])
+    # Print the mask as 1 and 0
+    print(f"updated mask: {''.join(['1' if x else '0' for x in mask[:10]])}")
+    # Print the mask as 1 and 0, 4096/D items per group
+    
+    mask_str = ''.join(['1' if x else '0' for x in mask])
+    grouped_mask = [mask_str[i:i+group_size] for i in range(0, len(mask_str), group_size)]
+    print("updated Mask (grouped):")
+    for group in grouped_mask[:100]:
+        print(group, end=' ')
+    print('')
 
     # Clear the mapping and revert the tensor to its initial state
-    sparsetensor_clearmap(tensor)
+    mask = sparsetensor_clearmap(tensor, mask)
+
+    mask_str = ''.join(['1' if x else '0' for x in mask])
+    grouped_mask = [mask_str[i:i+group_size] for i in range(0, len(mask_str), group_size)]
+    print("after sparsetensor_clearmap -- updated Mask (grouped):")
+    for group in grouped_mask[:100]:
+        print(group, end=' ')
+    print('')
+        
+    # Print a few mapped rows after clearmap
+    print("Mapped rows after clearmap:")
+    for i in range(min(5, tensor_shape[0])):
+        print(tensor[i])
+
+    print("done")

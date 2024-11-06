@@ -18,9 +18,15 @@ sudo systemctl start avahi-daemon
 sudo apt install s-tui
 
 sudo apt update
-sudo apt install -y python3-pip python3-venv 
-sudo apt install -y ninja-build        # only needed for CUDA?
 
+# to build c extension ...
+sudo apt install -y build-essential 
+sudo apt install -y libopenblas-dev
+
+sudo apt install -y python3-pip python3-venv 
+sudo apt install -y ninja-build        # only needed for CUDA extension
+
+# ------ python venv ---- #
 cd ~/workspace-rwkv
 python3 -m venv myenv
 source myenv/bin/activate
@@ -28,6 +34,10 @@ source myenv/bin/activate
 which pip
 which python3
 # --- should point to myvenv
+
+# ------ python packages ---- #
+cd ~/workspace-rwkv/RWKV-LM/RWKV-v5/
+pip install -r requirements-pi.txt
 
 # ---- deploy models --- #
 sudo mkdir -p /data/models/pi-deployment
@@ -40,9 +50,6 @@ scp -3 amd2:/data/models/pi-deployment/* odroid:/data/models/pi-deployment/
 cd ~/workspace-rwkv/RWKV-LM/RWKV-v5
 source env-pi.sh
 
-# ------ python packages ---- #
-cd RWKV-v5
-pip install -r requirements-pi.txt
 
 
 COMMON PROBLEMS....

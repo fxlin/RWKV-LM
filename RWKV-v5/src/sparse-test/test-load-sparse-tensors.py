@@ -20,11 +20,10 @@ rpi5 raspbian: some mmap calls failed
         mmap_addresses: mmap failed: Invalid argument
         i 0, addr 0x7fff7cdc3000, length 2048, prot 3, flags 18, fd 3, offset 14336
 likely a kernel/distro issue? 
-rpi5 runs rapsbianOS (debian 12), kernel Linux rpi5 6.1.0-rpi7-rpi-2712 #1 SMP PREEMPT Debian 1:6.1.63-1+rpt1 (2023-11-24)
+
+OK: 
 rpi4: Ubuntu 2204, Linux rpi4 5.15.98-rt62-raspi
-
 opi0: Ubuntu 2204, Linux orangepizero2w 6.1.31-sun50iw9    # works fine, so not a kernel version issue?
-
 
 '''
 
