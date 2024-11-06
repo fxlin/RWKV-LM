@@ -49,9 +49,9 @@ int mmap_addresses(uintptr_t *addresses, size_t num_addresses, size_t length, in
                 printf("i %d, addr %p, length %ld, prot %d, flags %d, fd %d, offset %ld\n", i, addr, length, prot, flags, fd, offset);
                 return -1; 
             } else {
+                // printf("mmap_addresses: OK\n");
                 // printf("Memory mapped at: %p for requested address: %p with offset: %ld\n", mapped_addr, addr, offsets[i]);
-                perror("mmap_addresses: OK");
-                printf("i %d, addr %p, length %ld, prot %d, flags %d, fd %d, offset %ld\n", i, addr, length, prot, flags, fd, offset);
+                // printf("i %d, addr %p, length %ld, prot %d, flags %d, fd %d, offset %ld\n", i, addr, length, prot, flags, fd, offset);
                 last_mapped_addr = addr;
             }
         }
