@@ -1,0 +1,29 @@
+.1b, with cls, with mlp
+
+Before load model - Process memory: 200.03 MB, System memory: 2993.05 MB / 8053.72 MB
+After load model - Process memory: 628.97 MB, System memory: 3443.03 MB / 8053.72 MB
+After gc - Process memory: 628.97 MB, System memory: 3449.36 MB / 8053.72 MB
+Before deleting head.weight - Process memory: 628.97 MB, System memory: 3449.36 MB / 8053.72 MB
+will delete: head.weight, shape: torch.Size([65536, 768]), size: 98304.00 KB
+After deleting head.weight - Process memory: 533.62 MB, System memory: 3360.75 MB / 8053.72 MB
+
+
+del orghead
+del w['head.weight']
+# can free ~90MB
+4444 Before deleting head.weight - Process memory: 906.09 MB, System memory: 3229.97 MB / 8053.72 MB
+will delete: head.weight, shape: torch.Size([768, 65536]), size: 98304.00 KB
+4444  After deleting head.weight - Process memory: 810.11 MB, System memory: 3135.97 MB / 8053.72 MB
+
+
+# ... loading torch will consume 200MB....
+import torch
+import torch.nn as nn
+from torch.nn import functional as F
+print_memory_usage("after load torch")      # 194MB
+
+
+
+
+before del emb - Process memory: 625.92 MB, System memory: 3626.39 MB / 8053.72 MB
+After del emb - Process memory: 531.80 MB, System memory: 3623.48 MB / 8053.72 MB

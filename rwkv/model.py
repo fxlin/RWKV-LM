@@ -2,20 +2,35 @@
 # The RWKV Language Model - https://github.com/BlinkDL/RWKV-LM
 ########################################################################################################
 
-from typing import Optional
-import numpy as np
+# measure resources 
+import psutil
 import types, gc, os, time, re
+def print_memory_usage(stage):
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    system_mem = psutil.virtual_memory()
+    print(f"{stage} - Process memory: {mem_info.rss / (1024 * 1024):.2f} MB, System memory: {system_mem.used / (1024 * 1024):.2f} MB / {system_mem.total / (1024 * 1024):.2f} MB")
+    # breakpoint()
+
+print_memory_usage("before load modules")      # 36MB
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+print_memory_usage("after load torch")      # 194MB
+
+from typing import Optional
+import numpy as np
 from .emb_lookup import EmbeddingLookupTable
 # import matplotlib.pyplot as plt
 
+print_memory_usage("after load numpy")      # 194MB
 
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cuda.matmul.allow_tf32 = True
 current_path = os.path.dirname(os.path.abspath(__file__))
+
+
 
 ###############################################################################
 
@@ -28,9 +43,8 @@ def quantize(tensor, bit):
     quantized = ((tensor - zero_point) / scale).round().clamp(0, factor).to(torch.int8)
     return quantized, scale, zero_point
 
-@torch.jit.script
 def dequantize(quantized, scale, zero_point):
-    return quantized.mul(scale).add(zero_point).to(torch.half)
+    return quantized.to(torch.half) * scale + zero_point
 
 
 ########################################################################################################
@@ -219,7 +233,6 @@ def mm8(x: torch.Tensor, w: torch.Tensor, mx: torch.Tensor, rx: torch.Tensor, my
     return mm8_seq(x, w, mx, rx, my, ry)
 
 # xzl: "the" matmul, dispatch to float and quant (for mm8 above). called by rwkv model below
-# = a@b
 def matmul(a, b, mx: Optional[torch.Tensor]=None, rx: Optional[torch.Tensor]=None, my: Optional[torch.Tensor]=None, ry: Optional[torch.Tensor]=None, output_dtype: Optional[torch.dtype]=None) -> torch.Tensor:
     if output_dtype is None:
         output_dtype = a.dtype
@@ -281,6 +294,9 @@ class RWKV(MyModule):
     def __init__(self, model, strategy, verbose = True, convert_and_save_and_exit = None,
                  sparse_outpath = None, quant_bit = None, quant_map = None, mlp_map = None,
                  load_token_cls = None):
+        
+        # print_memory_usage("start RWKV")   # 200MB
+
         super().__init__()
         if verbose:
             prxxx = lambda *args, **kwargs: print(*args, **kwargs)
@@ -302,7 +318,8 @@ class RWKV(MyModule):
         self.stat_time_ffn_kx_kw = 0.0
         self.stat_time_ffn_vx_vw = 0.0
 
-        self.lazy_emb = True
+        # self.lazy_emb = True
+        self.lazy_emb = False # xzl
 
         self.sparse_outpath = sparse_outpath # collect sparse data inf FFN
 
@@ -322,8 +339,6 @@ class RWKV(MyModule):
         args.MODEL_NAME = model
         args.strategy_string = strategy
 
-        args.load_token_cls = load_token_cls
-
         # Rescale for fp16 mode: set x = x/2 every X layer (to avoid fp16 overflow)
         try:
             self.RESCALE_LAYER = int(os.environ["RWKV_RESCALE_LAYER"]) # !!! NOTE: SEEMS YOU SHOULD SET IT TO 999 (disable) FOR RWKV-MUSIC MODELS !!!
@@ -338,12 +353,17 @@ class RWKV(MyModule):
             args.MODEL_NAME += '.pth'
         prxxx(f'Loading {args.MODEL_NAME} ...')
         with torch.no_grad():
+            # xzl: below loads all weights to memory... (no lazy loading?? need fix
+            print_memory_usage("Before load model")
             self.w = torch.load(args.MODEL_NAME, map_location='cpu', weights_only=True) # load model to CPU first
-            gc.collect()
-            w = self.w
+            print_memory_usage("After load model")
+            gc.collect()    # xzl: free up intermediate buffer (if any)
+            print_memory_usage("After gc")
 
+            w = self.w
+            
             ALREADY_CONVERTED = False
-            if '_strategy' in w:
+            if '_strategy' in w:  # xzl: special key to indicate model has been converted...
                 ALREADY_CONVERTED = True
                 assert convert_and_save_and_exit == None # you should only convert a raw model
                 prxxx(f"Converted model: strategy {w['_strategy']}, version {w['_version']}\n")
@@ -353,6 +373,26 @@ class RWKV(MyModule):
                 del w['_strategy']
                 del w['_version']
                 del w['_rescale_layer']
+
+            # xzl: make "emb" memory mapped (load on demand
+            print_memory_usage("before del emb")
+            dtype = w['emb.weight'].dtype
+            orgshape = w['emb.weight'].shape
+            # w['emb.weight'].numpy().tofile(f'/tmp/emb.bin')     # unsupported bfloat16 by numpy
+            # w['emb.weight'].cpu().numpy().astype(np.uint16).tofile('/tmp/emb_bfloat16.bin') # wont work 
+            with open(f'/tmp/emb.bin', 'wb') as f:
+                # f.write(w['emb.weight'].contiguous().storage().byte())
+                # f.write(w['emb.weight'].contiguous().storage()._untyped().byte())
+                f.write(w['emb.weight'].contiguous().view(torch.uint16).numpy().tobytes())  # works 
+            del w['emb.weight']
+            gc.collect()
+            print_memory_usage("After del emb")   # save 100MB
+            # breakpoint()
+
+            # checked below: values seem right 
+            w['emb.weight'] = torch.from_file(f'/tmp/emb.bin', dtype=dtype, size=orgshape.numel()).reshape(orgshape)        
+            print_memory_usage("After reload emb (mmaped)")   # mem does not change
+            # breakpoint()
             
             args.n_embd = w['emb.weight'].shape[1]
             # xzl: detect dimension, etc. (moved down
@@ -394,7 +434,7 @@ class RWKV(MyModule):
                 # xzl: is this right? 
                 args.n_att = w['blocks.0.att.key2.weight'].shape[0] # note: transposed matrix
                 args.n_ffn = w['blocks.0.ffn.key.weight'].shape[0] # unchanged
-            elif self.version in [5.94, 5.95, 5.96]:
+            elif self.version in [5.94, 5.95, 5.96]:   # experimental -- not in use
                 args.n_att = w['blocks.0.att.key2.weight'].shape[0] # note: transposed matrix
                 args.n_ffn = w['blocks.0.ffn.key2.weight'].shape[0]
             else: # official model
@@ -482,9 +522,6 @@ class RWKV(MyModule):
                 del w['blocks.0.ln0.weight']
                 del w['blocks.0.ln0.bias']
 
-            if self.lazy_emb:
-                self.emb = EmbeddingLookupTable(w['emb.weight'], args.n_embd, w['emb.weight'].shape[0])
-
             print_need_newline = False
 
             REAL_TIME_FIRST = False
@@ -512,9 +549,9 @@ class RWKV(MyModule):
 
                 # xzl: quantize ffn.key... 
                 if 'ffn.key.weight' in x:
-                    w[x+'4b']   = quantize(w[x].t().to(DEVICE), 4)   # a tuple
-                    w[x+'2b']   = quantize(w[x].t().to(DEVICE), 2)   # a tuple
-                    w[x+'1b']   = quantize(w[x].t().to(DEVICE), 1)   # a tuple
+                    w[x+'4b']   = quantize(w[x].t(), 4)   # a tuple
+                    w[x+'2b']   = quantize(w[x].t(), 2)   # a tuple
+                    w[x+'1b']   = quantize(w[x].t(), 1)   # a tuple
 
                 if not ALREADY_CONVERTED:
                     if self.RESCALE_LAYER > 0:  # xzl we didnt touch these..
@@ -667,8 +704,10 @@ class RWKV(MyModule):
             if 'head_l1.weight' in w: # use compressed cls heads                
                 import numpy as np
                 args.head_K = 200    # XXX
-                # md5sum: 1ba8dc5e...
+                '''
+                # testing code #
                 if is_raspberry_pi() or is_odroid():
+                    # md5sum: 1ba8dc5e...
                     args.load_token_cls='/data/models/pi-deployment/rwkv-823-cls.npy'
                 else: 
                     # args.load_token_cls='/data/home/bfr4xr/RWKV-LM/RWKV-v5/out/01b-pre-x59-8x-cls/from-hpc/rwkv-823-cls.npy'
@@ -676,7 +715,8 @@ class RWKV(MyModule):
                     #args.load_token_cls='models/01b-x59-cls.npy'
                     #args.load_token_cls='models/04b-x59-cls.npy'
                     pass
-                
+                '''
+
                 K=args.head_K
                 labels = np.load(args.load_token_cls)
                 # idx: cls id, element: list of token_id inside the cls
@@ -712,17 +752,37 @@ class RWKV(MyModule):
                     self.clusters_tensor.append(
                         torch.tensor(ccc))
 
+                #  --- exp --- will crash
+                if 0: 
+                    print_memory_usage("2222 Before deleting head.weight")
+                    x='head.weight'
+                    del w['head.weight']
+                    gc.collect()
+                    print_memory_usage("2222 After deleting head.weight")
+                    breakpoint()
+
                 # build head_l2, but by splitting the original cls head weights
-                self.head_l2org_weight = []
+                self.head_l2org_weight = []  # weights gattered from self.head (w['head.weight'])
 
                 for cls in range(0, len(clusters)):
                     # NB: w['head.weight'] shape (D,vocab), already transposed
                     orghead = w['head.weight'].T  # orghead shape (vocab, D)
                     idx = torch.tensor(clusters[cls], device=orghead.device)
                     # ww = torch.gather(input=orghead,dim=0,index=idx)
+                    # below: does data copy. creates a new tensor ww by gathering specific rows from orghead.
                     ww = orghead[idx]
                     w[f'head_l2org.{cls}.weight'] = ww # save it in dict
                     self.head_l2org_weight.append(ww.t())   # alternatively, save in list  
+
+                #  --- exp --- .... cannot free up memory
+                if 0: 
+                    print_memory_usage("3333 Before deleting head.weight")
+                    x='head.weight'
+                    del orghead
+                    del w['head.weight']
+                    gc.collect()
+                    print_memory_usage("3333 After deleting head.weight")
+                    breakpoint()
 
                 # cf rwkv/utils.py generate()
                 # XXX move it out of "model", to "pipeline"
@@ -731,7 +791,16 @@ class RWKV(MyModule):
                 # avoid indexing "w" (the model state dict) inside _retrieve_value3(), which 
                 # prevents it from using torch.script... 
                 self.head_l1_weight = w['head_l1.weight']
-                self.vocab = w['head.weight'].shape[1]   # shape D,vocab                    
+                self.vocab = w['head.weight'].shape[1]   # shape D,vocab
+
+                print_memory_usage("4444 Before deleting head.weight")
+                # save space
+                x='head.weight'
+                print(f"will delete: {x}, shape: {w[x].shape}, size: {w[x].nelement() * w[x].element_size() / 1024:.2f} KB")
+                del orghead
+                del w['head.weight']
+                gc.collect()
+                print_memory_usage("4444  After deleting head.weight")
 
             prxxx("parameter size: ", f"{total_parameter_size / MiB:.3f} MB")
             
@@ -850,22 +919,15 @@ class RWKV(MyModule):
     @MyFunction
     def ffn_one_v5_8(self, x, sx, ln_w, ln_b, k_mix, r_mix, kw, vw, 
                      rw1, rw2, # sans rwdiag, 
-                     kmx, krx, kmy, kry, vmx, vrx, vmy, vry, 
-                     rmx1, rrx1, rmy1, rry1,
-                     rmx2, rrx2, rmy2, rry2,
-                    layer_id :int,       # xzl
-                    mlp_weights = None,     # TBD
-                    quant_weight = None,    # TBD
-                    time_measure = None,    # TBD            
-                    ):
+                     kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry):
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
         kx = xx * k_mix + sx * (1 - k_mix)
         rx = xx * r_mix + sx * (1 - r_mix)
 
         # r = torch.sigmoid(matmul(rx, rw, rmx, rrx, rmy, rry)) # orig
-        r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
+        r = matmul(rx, rw1) 
         # r = torch.relu(r) ** 2    // no relu
-        r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2)
+        r = matmul(r, rw2)
         r = torch.sigmoid(r)
 
         vx = torch.relu(matmul(kx, kw, kmx, krx, kmy, kry)) ** 2
@@ -969,65 +1031,49 @@ class RWKV(MyModule):
                          layer_id,       # xzl
                          mlp_weights = None,
                          quant_weight = None,
-                         time_measure = None,
                          ):
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
         kx = xx * k_mix + sx * (1 - k_mix)
         rx = xx * r_mix + sx * (1 - r_mix)
 
         # r = torch.sigmoid(matmul(rx, rw, rmx, rrx, rmy, rry)) # orig
-        mm_start_t = time.time()
         r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         r = torch.relu(r) ** 2
         r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2)
-        # r += rx @ torch.diag(rwdiag)
-        r += rx * rwdiag # faster than above ...
+        r += rx @ torch.diag(rwdiag)   # xzl: should use matmul??
         r = torch.sigmoid(r)
-        mm_end_t = time.time()
-        time_measure['ffn_rx_rw'] += mm_end_t - mm_start_t
         
         # ------ FFN core ----------
         # MLP predictor        
-        mlp_exec_start_t = time.time()
-        mlp_pred = None
         if mlp_weights is not None:
             thr = self.mlp_map[layer_id] # MLP threshold
             mlpfc1, mlpfc2 = mlp_weights
             mlp_pred = torch.relu(kx @ mlpfc1) @ mlpfc2  # logits
             mlp_pred = torch.sigmoid(mlp_pred) 
             mlp_pred = (mlp_pred > thr).int()
-        mlp_exec_end_t = time.time()
 
         # --- quant pred, n bit    
-        quant_pred = None
-        quant_exec_start_t = time.time()
         if quant_weight is not None:
             kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
-            kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit)
+            kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit).to(kx.device)
             result = (kx @ kw_nbit_dequant).float()
-            percent = self.quant_map[layer_id] # percentile, we use to take quant as activated
+            percent = quant_map[layer_id] # percentile, we use to take quant as activated
 
             # --- predict percentile as "activated"
             percentile = torch.quantile(result, percent).item()
             quant_pred = (result > percentile).int()
-        quant_exec_end_t = time.time()
-
-
-        time_measure['mlp_exec'] += mlp_exec_end_t - mlp_exec_start_t
-        time_measure['quant_exec'] += quant_exec_end_t - quant_exec_start_t
 
         pred = None
-        if mlp_pred is not None and quant_pred is not None:
+        if mlp_weights is not None and quant_weight is not None:
             pred = mlp_pred | quant_pred    # ensemble
-        elif mlp_pred is not None:
+        elif mlp_weights is not None:
             pred = mlp_pred
-        elif quant_pred is not None:
+        elif quant_weight is not None:
             pred = quant_pred
         
         # actual compute
-        mm_start_t = time.time()
         k = matmul(kx, kw, kmx, krx, kmy, kry)  
-        vx = torch.relu(k) ** 2     # xzl: vx sparse activation.
+        vx = torch.relu(k) ** 2     # xzl: vx: sparse activation.
         mm_end_t = time.time()
 
         time_measure['ffn_kx_kw'] += mm_end_t - mm_start_t
@@ -1064,9 +1110,7 @@ class RWKV(MyModule):
                 f'recall {recall:.3f} '
                 )
             breakpoint()
-        mm_start_t = time.time()
         v = matmul(vx, vw, vmx, vrx, vmy, vry)
-        mm_end_t = time.time()
         out = r * v
         return x + out, xx
     
@@ -1212,24 +1256,16 @@ class RWKV(MyModule):
     @MyFunction
     def ffn_seq_v5_8(self, x, sx, ln_w, ln_b, k_mix, r_mix, kw, vw, 
                      rw1, rw2, # sans rwdiag, 
-                     kmx, krx, kmy, kry, 
-                     vmx, vrx, vmy, vry, 
-                     rmx1, rrx1, rmy1, rry1,
-                     rmx2, rrx2, rmy2, rry2,
-                     layer_id :int,      # xzl 
-                     mlp_weights = None,    # TBD
-                     quant_weight = None,   # TBD
-                     time_measure = None,   # TBD
-                     ):
+                     kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry):
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
         sx = torch.cat((sx.unsqueeze(0), xx[:-1,:]))
         kx = xx * k_mix + sx * (1 - k_mix)
         rx = xx * r_mix + sx * (1 - r_mix)
 
         # r = torch.sigmoid(matmul(rx, rw, rmx, rrx, rmy, rry)) # orig
-        r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
+        r = matmul(rx, rw1) 
         # r = torch.relu(r) ** 2    # no relu
-        r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2)
+        r = matmul(r, rw2)
         r = torch.sigmoid(r)        
 
         vx = torch.relu(matmul(kx, kw, kmx, krx, kmy, kry)) ** 2
@@ -1278,7 +1314,6 @@ class RWKV(MyModule):
                      layer_id,      # xzl 
                      mlp_weights = None,
                      quant_weight = None,
-                     time_measure = None,
                      ):
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
         sx = torch.cat((sx.unsqueeze(0), xx[:-1,:]))
@@ -1286,31 +1321,22 @@ class RWKV(MyModule):
         rx = xx * r_mix + sx * (1 - r_mix)
 
         # r = torch.sigmoid(matmul(rx, rw, rmx, rrx, rmy, rry)) # orig
-        mm_start_t = time.time()
         r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         r = torch.relu(r) ** 2
         r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2)
-        # r += rx @ torch.diag(rwdiag)
-        r += rx * rwdiag # xzl: faster than above...
-        r = torch.sigmoid(r)
-        mm_end_t = time.time()
-        time_measure['ffn_rx_rw'] += mm_end_t - mm_start_t
+        r += rx @ torch.diag(rwdiag)   # xzl: use matmul??
+        r = torch.sigmoid(r)        
 
         # ------ FFN core ----------
         # MLP predictor        
-        time_measure['mlp_exec_start'] = time.time()
-        mlp_pred = None
         if mlp_weights is not None:
             thr = self.mlp_map[layer_id] # MLP threshold
             mlpfc1, mlpfc2 = mlp_weights
             mlp_pred = torch.relu(kx @ mlpfc1) @ mlpfc2  # logits
             mlp_pred = torch.sigmoid(mlp_pred) 
             mlp_pred = (mlp_pred > thr).int()
-        time_measure['mlp_exec_end'] = time.time()
 
         # --- quant pred, n bit    
-        quant_pred = None
-        time_measure['quant_exec_start'] = time.time()
         if quant_weight is not None:
             kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
             kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit).to(kx.device)
@@ -1322,35 +1348,24 @@ class RWKV(MyModule):
             percentile = torch.quantile(result, percent).item()
             quant_pred = (result > percentile).int()
 
-        time_measure['quant_exec_end'] = time.time()
-
         if False:
-            quant_sparsity = 1-torch.sum(quant_pred > 0)/torch.numel(quant_pred)
-            mlp_sparsity  = 1-torch.sum(mlp_pred > 0)/torch.numel(mlp_pred)
-            ensemble_sparsity = 1-torch.sum((quant_pred | mlp_pred) > 0)/torch.numel(quant_pred | mlp_pred)
-            if layer_id == 0:
-                print(f"layer_id quant_sparsity mlp_sparsity ensemble_sparsity")
-            print(f"{layer_id} {quant_sparsity} {mlp_sparsity} {ensemble_sparsity}")
-
-
-        time_measure['mlp_exec'] = time_measure['mlp_exec_end'] - time_measure['mlp_exec_start']
-        time_measure['quant_exec'] = time_measure['quant_exec_end'] - time_measure['quant_exec_start']
+            print("check parameter correctly passed")
+            print(f"layer_id {layer_id}")
+            print(f"mlp_map {self.mlp_map}")
+            print(f"quant_map {self.quant_map}")
+            print(f"quant_bit {self.quant_bit}")
 
         pred = None
-        if mlp_pred is not None and quant_pred is not None:
+        if mlp_weights is not None and quant_weight is not None:
             pred = mlp_pred | quant_pred    # ensemble
-        elif mlp_pred is not None:
+        elif mlp_weights is not None:
             pred = mlp_pred
-        elif quant_pred is not None:
+        elif quant_weight is not None:
             pred = quant_pred
 
         # actual compute
-        mm_start_t = time.time()
         k = matmul(kx, kw, kmx, krx, kmy, kry)  
         vx = torch.relu(k) ** 2     # xzl: vx sparse activation.
-        mm_end_t = time.time()
-
-        time_measure['ffn_kx_kw'] += mm_end_t - mm_start_t
 
         # sanity check -- pred accuracy
         if False:
@@ -1371,11 +1386,7 @@ class RWKV(MyModule):
         # simulate the pred ...
         if pred is not None:       # all layers sparse
             vx = vx * pred
-
-        mm_start_t = time.time()
         v = matmul(vx, vw, vmx, vrx, vmy, vry)
-        mm_end_t = time.time()
-        time_measure['ffn_vx_vw'] += mm_end_t - mm_start_t
 
         out = r * v
         return x + out, xx[-1,:]
@@ -1793,32 +1804,28 @@ class RWKV(MyModule):
         r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         r = torch.relu(r) ** 2
         r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2, output_dtype=torch.float32)     
-        # r += rx @ torch.diag(rwdiag)   
-        r += rx * rwdiag        # xzl: faster than above...
+        r += rx @ torch.diag(rwdiag)   # xzl: should use matmul??
         r = r.view(H,1,N)
 
         # k = matmul(kx, kw, kmx, krx, kmy, kry, output_dtype=torch.float32).view(H, N, 1) # orig
         k = matmul(kx, kw1, kmx1, krx1, kmy1, kry1) 
         k = torch.relu(k) ** 2
         k = matmul(k, kw2, kmx2, krx2, kmy2, kry2, output_dtype=torch.float32)
-        # k += kx @ torch.diag(kwdiag)
-        k += kx * kwdiag  # faster than above...
+        k += kx @ torch.diag(kwdiag)
         k = k.view(H,N,1)
 
         # v = matmul(vx, vw, vmx, vrx, vmy, vry, output_dtype=torch.float32).view(H, 1, N) # orig
         v = matmul(vx, vw1, vmx1, vrx1, vmy1, vry1) 
         v = torch.relu(v) ** 2
         v = matmul(v, vw2, vmx2, vrx2, vmy2, vry2, output_dtype=torch.float32)     
-        # v += vx @ torch.diag(vwdiag)
-        v += vx * vwdiag # faster than above...
+        v += vx @ torch.diag(vwdiag)
         v = v.view(H,1,N)
 
         # g = F.silu(matmul(gx, gw, gmx, grx, gmy, gry))  @ orig
         g = matmul(gx, gw1, gmx1, grx1, gmy1, gry1)
         g = torch.relu(g) ** 2
         g = matmul(g, gw2, gmx2, grx2, gmy2, gry2) 
-        # g += gx @ torch.diag(gwdiag)
-        g += gx * gwdiag  # faster than above...
+        g += gx @ torch.diag(gwdiag)
         g = F.silu(g) 
         
         a = matmul(k, v)
@@ -1836,16 +1843,7 @@ class RWKV(MyModule):
     @MyFunction
     def att_one_v5_8(self, x, sx, s, ln_w, ln_b, lx_w, lx_b, k_mix, v_mix, r_mix, g_mix, t_decay, t_first, 
                      kw1,kw2, vw1,vw2, rw1,rw2, gw1,gw2,    # ours 
-                     ow, 
-                     kmx1, krx1, kmy1, kry1, 
-                     kmx2, krx2, kmy2, kry2, 
-                     vmx1, vrx1, vmy1, vry1, 
-                     vmx2, vrx2, vmy2, vry2, 
-                     rmx1, rrx1, rmy1, rry1, 
-                     rmx2, rrx2, rmy2, rry2, 
-                     gmx1, grx1, gmy1, gry1, 
-                     gmx2, grx2, gmy2, gry2, 
-                     omx, orx, omy, ory):        
+                     ow, kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry, gmx, grx, gmy, gry, omx, orx, omy, ory):        
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
         kx = xx * k_mix + sx * (1 - k_mix)
         vx = xx * v_mix + sx * (1 - v_mix)
@@ -1856,27 +1854,27 @@ class RWKV(MyModule):
         N = x.shape[-1] // H
 
         # r = matmul(rx, rw, rmx, rrx, rmy, rry, output_dtype=torch.float32).view(H, 1, N)  # orig
-        r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
+        r = matmul(rx, rw1) 
         # r = torch.relu(r) ** 2    # no relu
-        r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2, output_dtype=torch.float32)
+        r = matmul(r, rw2, output_dtype=torch.float32)     
         r = r.view(H,1,N)
 
         # k = matmul(kx, kw, kmx, krx, kmy, kry, output_dtype=torch.float32).view(H, N, 1) # orig
-        k = matmul(kx, kw1, kmx1, krx1, kmy1, kry1) 
+        k = matmul(kx, kw1) 
         # k = torch.relu(k) ** 2   # no relu
-        k = matmul(k, kw2, kmx2, krx2, kmy2, kry2, output_dtype=torch.float32)
+        k = matmul(k, kw2, output_dtype=torch.float32)
         k = k.view(H,N,1)
 
         # v = matmul(vx, vw, vmx, vrx, vmy, vry, output_dtype=torch.float32).view(H, 1, N) # orig
-        v = matmul(vx, vw1, vmx1, vrx1, vmy1, vry1) 
+        v = matmul(vx, vw1) 
         # v = torch.relu(v) ** 2   # no relu
-        v = matmul(v, vw2, vmx2, vrx2, vmy2, vry2, output_dtype=torch.float32)
+        v = matmul(v, vw2, output_dtype=torch.float32)     
         v = v.view(H,1,N)
 
         # g = F.silu(matmul(gx, gw, gmx, grx, gmy, gry))  @ orig
-        g = matmul(gx, gw1, gmx1, grx1, gmy1, gry1)
+        g = matmul(gx, gw1)
         # g = torch.relu(g) ** 2    # no relu
-        g = matmul(g, gw2, gmx2, grx2, gmy2, gry2)
+        g = matmul(g, gw2) 
         g = F.silu(g) 
         
         a = matmul(k, v)
@@ -1919,32 +1917,28 @@ class RWKV(MyModule):
         r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         r = torch.relu(r) ** 2
         r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2, output_dtype=torch.float32)     
-        # r += rx @ torch.diag(rwdiag)
-        r += rx * rwdiag   # faster than above...
+        r += rx @ torch.diag(rwdiag)   # xzl: should use matmul??
         r = r.view(T,H,N).transpose(0, 1)
 
         # k = matmul(kx, kw, kmx, krx, kmy, kry, output_dtype=torch.float32).view(T, H, N).permute(1, 2, 0) # orig
         k = matmul(kx, kw1, kmx1, krx1, kmy1, kry1) 
         k = torch.relu(k) ** 2
         k = matmul(k, kw2, kmx2, krx2, kmy2, kry2, output_dtype=torch.float32)     
-        # k += kx @ torch.diag(kwdiag)
-        k += kx * kwdiag  # faster than above...
+        k += kx @ torch.diag(kwdiag)
         k = k.view(T,H,N).permute(1, 2, 0)
                 
         # v = matmul(vx, vw, vmx, vrx, vmy, vry, output_dtype=torch.float32).view(T, H, N).transpose(0, 1) # orig
         v = matmul(vx, vw1, vmx1, vrx1, vmy1, vry1) 
         v = torch.relu(v) ** 2
         v = matmul(v, vw2, vmx2, vrx2, vmy2, vry2, output_dtype=torch.float32)     
-        # v += vx @ torch.diag(vwdiag)
-        v += vx * vwdiag  # faster than above...
+        v += vx @ torch.diag(vwdiag)
         v = v.view(T,H,N).transpose(0, 1)
 
         # g = F.silu(matmul(gx, gw, gmx, grx, gmy, gry)) # orig
         g = matmul(gx, gw1, gmx1, grx1, gmy1, gry1)
         g = torch.relu(g) ** 2
         g = matmul(g, gw2, gmx2, grx2, gmy2, gry2)
-        # g += gx @ torch.diag(gwdiag)
-        g += gx * gwdiag  # faster than above...
+        g += gx @ torch.diag(gwdiag)
         g = F.silu(g)
 
         out = torch.empty((T, H, N), dtype=r.dtype, device=r.device)
@@ -1967,16 +1961,7 @@ class RWKV(MyModule):
     @MyFunction
     def att_seq_v5_8(self, x, sx, s, ln_w, ln_b, lx_w, lx_b, k_mix, v_mix, r_mix, g_mix, t_decay, t_first, 
                      kw1,kw2, vw1,vw2, rw1,rw2, gw1,gw2, 
-                     ow, 
-                     kmx1, krx1, kmy1, kry1,
-                     kmx2, krx2, kmy2, kry2,
-                     vmx1, vrx1, vmy1, vry1, 
-                     vmx2, vrx2, vmy2, vry2, 
-                     rmx1, rrx1, rmy1, rry1, 
-                     rmx2, rrx2, rmy2, rry2, 
-                     gmx1, grx1, gmy1, gry1, 
-                     gmx2, grx2, gmy2, gry2, 
-                     omx, orx, omy, ory):
+                     ow, kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry, gmx, grx, gmy, gry, omx, orx, omy, ory):
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
         sx = torch.cat((sx.unsqueeze(0), xx[:-1,:]))
         kx = xx * k_mix + sx * (1 - k_mix)
@@ -1989,27 +1974,27 @@ class RWKV(MyModule):
         T = x.shape[0]
 
         # r = matmul(rx, rw, rmx, rrx, rmy, rry, output_dtype=torch.float32).view(T, H, N).transpose(0, 1) # orig
-        r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
+        r = matmul(rx, rw1) 
         # r = torch.relu(r) ** 2        # no relu
-        r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2, output_dtype=torch.float32)
+        r = matmul(r, rw2, output_dtype=torch.float32)     
         r = r.view(T,H,N).transpose(0, 1)
 
         # k = matmul(kx, kw, kmx, krx, kmy, kry, output_dtype=torch.float32).view(T, H, N).permute(1, 2, 0) # orig
-        k = matmul(kx, kw1, kmx1, krx1, kmy1, kry1) 
+        k = matmul(kx, kw1) 
         # k = torch.relu(k) ** 2        # no relu
-        k = matmul(k, kw2, kmx2, krx2, kmy2, kry2, output_dtype=torch.float32)     
+        k = matmul(k, kw2, output_dtype=torch.float32)     
         k = k.view(T,H,N).permute(1, 2, 0)
                 
         # v = matmul(vx, vw, vmx, vrx, vmy, vry, output_dtype=torch.float32).view(T, H, N).transpose(0, 1) # orig
-        v = matmul(vx, vw1, vmx1, vrx1, vmy1, vry1) 
+        v = matmul(vx, vw1) 
         # v = torch.relu(v) ** 2        # no relu
-        v = matmul(v, vw2, vmx2, vrx2, vmy2, vry2, output_dtype=torch.float32)
+        v = matmul(v, vw2, output_dtype=torch.float32)     
         v = v.view(T,H,N).transpose(0, 1)
 
         # g = F.silu(matmul(gx, gw, gmx, grx, gmy, gry)) # orig
-        g = matmul(gx, gw1, gmx1, grx1, gmy1, gry1)
+        g = matmul(gx, gw1)
         # g = torch.relu(g) ** 2        # no relu
-        g = matmul(g, gw2, gmx2, grx2, gmy2, gry2)
+        g = matmul(g, gw2) 
         g = F.silu(g)
 
         out = torch.empty((T, H, N), dtype=r.dtype, device=r.device)
@@ -2149,7 +2134,7 @@ class RWKV(MyModule):
         # vocab = w['head.weight'].shape[1]   # shape D,vocab
         vocab = self.vocab
         # logits = torch.full((vocab,), float("-inf"), device='cuda', dtype=x.dtype) 
-        logits = torch.full((vocab,), float("-inf"), dtype=x.dtype) 
+        logits = torch.full((vocab,), float("-inf"), device=x.device, dtype=x.dtype) 
         #logits = torch.zeros((vocab,), device='cuda', dtype=x.dtype) 
 
         t2 = time.time()
@@ -2158,7 +2143,8 @@ class RWKV(MyModule):
         # (done) scatter_known_time > proj_known_time (~1.5x-2x), to optimize
         #   idea: since the # of predicted CLS is likely small, we may bundle them in one tensor
         # (with padding), do projection & scatter in one go.
-        sum_known_logits_exp = torch.tensor(0.0, device="cpu")  # sum of exp(logits) for all "known" clusters
+        num_tokens=0
+        sum_known_logits_exp = torch.tensor(0.0)  # sum of exp(logits) for all "known" clusters
 
         proj_known_time = 0.0 
         scatter_known_time = 0.0
@@ -2174,11 +2160,8 @@ class RWKV(MyModule):
             tt0 = time.time()
 
             # x1 = x @ w[f'head_l2org.{cls}.weight'] 
-            x1 = (x @ head_l2org_weight[cls]).to("cpu")
-            # WC: stabilize the exp(logits) by subtracting the max value
-            # https://blester125.com/blog/softmax.html#:~:text=Subtracting%20the%20maximum%20from%20all,subsequent%20sum%20will%20never%20overflow.
-            exp_x1 = torch.exp(x1 - x1.max())
-            sum_known_logits_exp += torch.sum(exp_x1).float()
+            x1 = x @ head_l2org_weight[cls]
+            sum_known_logits_exp += torch.sum(torch.exp(x1)).float()
 
             tt1 = time.time()
 
@@ -2188,7 +2171,7 @@ class RWKV(MyModule):
             # idx = torch.tensor(self.clusters[cls], device='cuda')
             idx = self.clusters_tensor[cls]
 
-            #num_tokens += idx.shape[0]
+            num_tokens += idx.shape[0]
 
             # Collect indices and logits
             all_idx.append(idx)
@@ -2214,7 +2197,6 @@ class RWKV(MyModule):
             cls_log_time = 0.0
             # all "other clusters": pseudo logits 
             Q = sum_known_logits_exp                    
-            P = sum_known_probs = CLSPROBS.sum().to("cpu")
             for i in range(0, len(CLS_OTHER)):
                 tt0 = time.time()
 
@@ -2230,12 +2212,12 @@ class RWKV(MyModule):
 
                 # x1: pseudo logits over tokens inside cls, (as scatter src
                 # S_j: sum of exp logits for the cluster
-                S_j  = Q * (clsprob / P)
-                vvv = ((S_j / num_t)).log()
+                S_j  = Q * (clsprob / CLSPROBS.sum())
+                vvv = (S_j / num_t).log()
                 # x1 = vvv * torch.ones(num_t, device=x.device, dtype=x.dtype)
 
                 tt2 = time.time()
-                # idx: 1D tensor, src: 1D tensor
+                # idx: 1D tensor, src: 1D tensor                
                 # logits.scatter_(dim=0, index=idx, src=x1)
                 logits.index_fill_(dim=0, index=idx, value=vvv)
                 tt3 = time.time()
@@ -2283,7 +2265,9 @@ class RWKV(MyModule):
             # breakpoint()
 
         # update statistics
+        self.stat_runs += 1
         self.stat_loaded_cls += len(CLS)
+        self.stat_loaded_tokens += num_tokens
         
         # -- sanity check ---- ... expensive 
         if False: 
@@ -2425,13 +2409,7 @@ class RWKV(MyModule):
             time_measure['ffn_dispatch'] = 0
             time_measure['att_exec'] = 0
             time_measure['ffn_exec'] = 0
-            time_measure['mlp_exec'] = 0
-            time_measure['quant_exec'] = 0
-            time_measure['ffn_rx_rw'] = 0
-            time_measure['ffn_kx_kw'] = 0
-            time_measure['ffn_vx_vw'] = 0
             time_measure['fwd_start'] = time.time()
-            num_tokens = 0
 
             # xzl: init state
             if state == None:
@@ -2469,8 +2447,10 @@ class RWKV(MyModule):
                 else:
                     x = self.emb.get_embedding(tokens[0])
             else:
+                print_memory_usage("before emb exec")
                 x = w['emb.weight'][tokens if seq_mode else tokens[0]] # xzl: 'x'-input
-
+                print_memory_usage("after emb exec")
+                breakpoint()                
 
             ##### xzl: below- assemble & run layers (each layer)
             #  use custom cuda impl if available, otherwise fall back to torch
@@ -2708,14 +2688,10 @@ class RWKV(MyModule):
                         # kw, vw, rw, gw, 
                         kw1,kw2, vw1,vw2, rw1,rw2, gw1,gw2, # sans "diag"
                         ow,
-                        kmx1, krx1, kmy1, kry1,
-                        kmx2, krx2, kmy2, kry2,
-                        vmx1, vrx1, vmy1, vry1,
-                        vmx2, vrx2, vmy2, vry2,
-                        rmx1, rrx1, rmy1, rry1,
-                        rmx2, rrx2, rmy2, rry2,
-                        gmx1, grx1, gmy1, gry1,
-                        gmx2, grx2, gmy2, gry2,
+                        kmx, krx, kmy, kry,
+                        vmx, vrx, vmy, vry,
+                        rmx, rrx, rmy, rry,
+                        gmx, grx, gmy, gry,
                         omx, orx, omy, ory,
                         )
                 elif self.version in [5.9, 5.94, 5.95, 5.96]:
@@ -2863,7 +2839,6 @@ class RWKV(MyModule):
                             i,   # xzl, layer_id
                             mlp_weights=mlp_weights,
                             quant_weight=quant_weight,
-                            time_measure=time_measure,
                             )
                 elif self.version in [5.94]:
                     x, state[offset] = FFN(
@@ -2891,6 +2866,7 @@ class RWKV(MyModule):
                         rmx1, rrx1, rmy1, rry1,
                         rmx2, rrx2, rmy2, rry2,
                         )
+
                 elif self.version in [5.8]:
                     x, state[offset] = FFN(
                         x, state[offset],
@@ -2901,10 +2877,8 @@ class RWKV(MyModule):
                         rw1, rw2, # sans diag 
                         kmx, krx, kmy, kry,
                         vmx, vrx, vmy, vry,
-                        rmx1, rrx1, rmy1, rry1,
-                        rmx2, rrx2, rmy2, rry2,
-                        i   # xzl, layer_id                        
-                        )
+                        rmx, rrx, rmy, rry,                    
+                        )                    
                 elif self.version < 6.0:
                     x, state[offset] = FFN(
                         x, state[offset],
@@ -3324,7 +3298,7 @@ class RWKV(MyModule):
                     # update statistics
                     self.stat_runs += 1
                     self.stat_loaded_cls += len(CLS)
-                    #self.stat_loaded_tokens += num_tokens
+                    self.stat_loaded_tokens += num_tokens
                     
                     # -- sanity check ---- ... expensive 
                     if False: 
@@ -3424,18 +3398,13 @@ class RWKV(MyModule):
                     new_x = []
                     self.cached_orgx = x
                     for row in x:
-                        temp_x = self._retrieve_value3_jit(row, self.head_l1_weight, self.head_l2org_weight)
-                        new_x.append(temp_x)
-                        num_tokens += x.shape[0]
+                        new_x.append(self._retrieve_value3_jit(row, self.head_l1_weight, self.head_l2org_weight))
                     x = torch.stack(new_x)
                 else:
                     x = self._retrieve_value3_jit(x, self.head_l1_weight, self.head_l2org_weight)
-                    num_tokens += x.shape[0]
-                self.stat_loaded_tokens += num_tokens
 
             elif w['head.weight'].dtype != torch.uint8:  # original cls head
                 x = x @ w['head.weight']
-                num_tokens = x.shape[0]
             else:   # orig cls head, but int8
                 if seq_mode and full_output:                    
                     x = mm8_seq(x, w['head.weight'], w['head.weight_mx'], w['head.weight_rx'], w['head.weight_my'], w['head.weight_ry'])
@@ -3459,13 +3428,7 @@ class RWKV(MyModule):
             self.stat_time_fwd += time_measure["fwd_end"] - time_measure["fwd_start"]
             self.stat_time_att += time_measure["att_exec"]
             self.stat_time_ffn += time_measure["ffn_exec"]
-            self.stat_time_mlp += time_measure["mlp_exec"]
-            self.stat_time_quant += time_measure["quant_exec"]
-            self.stat_time_ffn_kx_kw += time_measure["ffn_kx_kw"]
-            self.stat_time_ffn_vx_vw += time_measure["ffn_vx_vw"]
             self.stat_time_cls += time_measure["cls_exec"]        
-            self.stat_runs += 1
-            self.stat_loaded_tokens += num_tokens
             # breakpoint()
 
             if self.sparse_outpath is not None:
@@ -3577,4 +3540,4 @@ class RWKV(MyModule):
         elif cutoff_idx>maxK:
             cutoff_idx=maxK
         return sorted_ids[:cutoff_idx], sorted_probs[:cutoff_idx], \
-            sorted_ids[cutoff_idx:].to("cpu"), sorted_probs[cutoff_idx:].to("cpu"),
+            sorted_ids[cutoff_idx:], sorted_probs[cutoff_idx:],

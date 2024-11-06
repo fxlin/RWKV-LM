@@ -1,15 +1,27 @@
 import os, sys, types, json, math, time
 import numpy as np
 np.set_printoptions(precision=4, suppress=True, linewidth=200)
+import psutil
 
-os.environ["RWKV_JIT_ON"] = '1'
+if os.environ.get('RWKV_CUDA_ON') != '0':
+    os.environ["RWKV_JIT_ON"] = '1'
 RWKV_HOME = os.environ.get('RWKV_HOME')
 
 if os.environ.get('RWKV_CUDA_ON') != '0':
     os.environ["RWKV_CUDA_ON"] = '1' #default
 os.environ["RWKV_CUDA_ON"] = '0' #default
 
+def print_memory_usage(stage):
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    system_mem = psutil.virtual_memory()
+    print(f"{stage} - Process memory: {mem_info.rss / (1024 * 1024):.2f} MB, System memory: {system_mem.used / (1024 * 1024):.2f} MB / {system_mem.total / (1024 * 1024):.2f} MB")
+    # breakpoint()
+
+# print_memory_usage("before init rwkv")      # 25MB
 from rwkv.model import RWKV
+# print_memory_usage("after init rwkv")      # 200MB
+
 from rwkv.utils import PIPELINE, PIPELINE_ARGS
 
 models = [
@@ -26,14 +38,16 @@ cls_models = [
         ]
 
 def my_print(s):
-    pass
-    #print(s, end='', flush=True)
+    # pass
+    print(s, end='', flush=True)
 
 token_limit = 200
 
 if __name__ == "__main__":
     isverbose = True
 
+    # print_memory_usage("main")      #  already 200MB here
+    
     for model_path, cls_path in zip(models, cls_models):
         # 8/26/24: using fp16 will make some benchmarks (eg openai) nan... so use fp32
         if "official" in model_path:
