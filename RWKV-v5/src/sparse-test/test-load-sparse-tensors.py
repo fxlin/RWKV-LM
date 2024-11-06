@@ -10,13 +10,15 @@ python3 test-load-sparse-tensors.py -bench3
 
 11/5/24: known problem
 
--bench3 failed on rpi5 (while -bench2 is ok)
-failed on the 1st mmap
-    mmap_addresses: mmap failed: Invalid argument
-    i 0, addr 0x7fff7cdc3000, length 2048, prot 3, flags 18, fd 3, offset 14336
+rpi5 raspbian: some mmap calls failed
+    rpi5 runs rapsbianOS (debian 12), kernel Linux rpi5 6.1.0-rpi7-rpi-2712 #1 SMP PREEMPT Debian 1:6.1.63-1+rpt1 (2023-11-24)
+    -bench3 failed on rpi5 (while -bench2 is ok)
+    failed on the 1st mmap
+        mmap_addresses: mmap failed: Invalid argument
+        i 0, addr 0x7fff7cdc3000, length 2048, prot 3, flags 18, fd 3, offset 14336
 likely a kernel/distro issue? 
-rpi5 runs rapsbianOS (debian 12), kernel Linux rpi5 6.1.0-rpi7-rpi-2712 #1 SMP PREEMPT Debian 1:6.1.63-1+rpt1 (2023-11-24)
-rpi4: Ubuntu 2204, Linux rpi4 5.15.98-rt62-raspi
+
+rpi4 OK: Ubuntu 2204, Linux rpi4 5.15.98-rt62-raspi
 
 
 '''
