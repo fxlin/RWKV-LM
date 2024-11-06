@@ -2,6 +2,9 @@
 load only certain columns of a tensor file (mmap)
 and measure overhead etc
 
+# then 
+./build.sh
+
 # first time 
 python3 test-load-sparse-tensors.py -save-tensor
 # then 
@@ -17,8 +20,10 @@ rpi5 raspbian: some mmap calls failed
         mmap_addresses: mmap failed: Invalid argument
         i 0, addr 0x7fff7cdc3000, length 2048, prot 3, flags 18, fd 3, offset 14336
 likely a kernel/distro issue? 
+rpi5 runs rapsbianOS (debian 12), kernel Linux rpi5 6.1.0-rpi7-rpi-2712 #1 SMP PREEMPT Debian 1:6.1.63-1+rpt1 (2023-11-24)
+rpi4: Ubuntu 2204, Linux rpi4 5.15.98-rt62-raspi
 
-rpi4 OK: Ubuntu 2204, Linux rpi4 5.15.98-rt62-raspi
+opi0: Ubuntu 2204, Linux orangepizero2w 6.1.31-sun50iw9    # works fine, so not a kernel version issue?
 
 
 '''
@@ -588,4 +593,22 @@ matvec compute time: 8.04 ms
 OBS: mmap() overhead is 2-3ms, matvec compute time is 5-6ms. (VARIES)   
     mmap(0 overhead does not scale with cpu speed? 
 
+
+11/5/24 opi0 results 
+
+(myenv) orangepi@orangepizero2w:~/workspace-rwkv/RWKV-LM/RWKV-v5/src/sparse-test$ python3 test-load-sparse-tensors.py -bench2
+Error in cpuinfo: prctl(PR_SVE_GET_VL) failed
+Memory mapped at: 0xffff88870000
+mmapped 819 rowsin 39.08 ms(0.0477 ms per row)
+row0 tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+rowN tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+matvec compute time: 15.29 ms
+
+(myenv) orangepi@orangepizero2w:~/workspace-rwkv/RWKV-LM/RWKV-v5/src/sparse-test$ python3 test-load-sparse-tensors.py -bench3
+Error in cpuinfo: prctl(PR_SVE_GET_VL) failed
+Memory mapped at: 0xffff683d0000
+mmapped 819 rowsin 20.55 ms(0.0251 ms per row)
+row0 tensor([1., 1., 1.,  ..., 1., 1., 1.], dtype=torch.float16)
+rowN tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+matvec compute time: 6.06 ms
 '''        
