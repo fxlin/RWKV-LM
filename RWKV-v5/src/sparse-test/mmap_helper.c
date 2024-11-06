@@ -73,7 +73,8 @@ int mmap_addresses(uintptr_t *addresses, size_t num_addresses, size_t length, in
 // Function to mmap each address from the passed list with anonymous mapping
 //   assuming addresses are sorted in ascending order.
 //   has check to avoid remapping the same page consecutively.
-int mmap_addresses_anon(uintptr_t *addresses, size_t num_addresses, size_t length, int prot, int flags) {
+int mmap_anon_addresses(uintptr_t *addresses, size_t num_addresses, size_t length, int prot, int flags) {
+    
     void *last_mapped_addr = NULL;
     for (int i = 0; i < num_addresses; i++) {
         void *addr = (void *)(addresses[i] & ~(0xFFF));     // page mask 
@@ -93,7 +94,7 @@ int mmap_addresses_anon(uintptr_t *addresses, size_t num_addresses, size_t lengt
                 fprintf(stderr, "%s\n", explain_mmap(addr, actual_length, prot, flags | MAP_ANONYMOUS, -1, 0));
                 return -1; 
             } else {
-                // printf("mmap_addresses_anon: OK\n");
+                // printf(">>>>> mmap_addresses_anon: OK\n");
                 // printf("Memory mapped at: %p for requested address: %p\n", mapped_addr, addr);
                 last_mapped_addr = addr;
             }

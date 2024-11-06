@@ -93,6 +93,7 @@ def custom_mmap_batch(addrlist, size, prot, flags, offsetlist, fd):
     # Call the helper function
     libhelper.mmap_addresses(addr_array, len(addrlist), size, prot, flags, offset_array, fd)
 
+###############################################################################
 libhelper.munmap_addresses.argtypes = [
     ctypes.POINTER(ctypes.c_void_p),  # addresses
     ctypes.c_size_t,                  # num_addresses
@@ -110,6 +111,26 @@ def custom_unmap_batch(addrlist, size):
 
     # Call the helper function
     libhelper.munmap_addresses(addr_array, len(addrlist), size)
+
+###############################################################################
+
+libhelper.mmap_anon_addresses.argtypes = [
+    ctypes.POINTER(ctypes.c_void_p),  # addresses
+    ctypes.c_size_t,                  # num_addresses
+    ctypes.c_size_t,                  # length
+    ctypes.c_int,                     # prot
+    ctypes.c_int                      # flags
+]
+# Return int (0 for success, -1 for failure)
+libhelper.mmap_anon_addresses.restype = ctypes.c_int  
+
+def custom_map_anon_batch(addrlist, size):
+    # prot = PROT_READ | PROT_WRITE
+    prot = PROT_READ   # enough??  w/ this we can catch some bugs, maybe 
+    flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED
+    addr_array = (ctypes.c_void_p * len(addrlist))(*addrlist)
+
+    libhelper.mmap_anon_addresses(addr_array, len(addrlist), size, prot, flags) 
 
 ###############################################################################
 
@@ -194,13 +215,16 @@ def sparsetensor_remap(tensor, file_path, old_mask, new_mask, do_unmap=True):
                     offsetlist.append(i * page_size)
             custom_mmap_batch(addrlist, page_size, prot, flags, offsetlist, f.fileno())
 
-    # Unmap pages
+    # shootdown the pages, free mem. subsueqnet read will return zeros
     if do_unmap:
         addrlist = []
         for i in range(num_pages):
             if tounmap_pagemask[i] == 1:
                 addrlist.append(anon_mmap + i * page_size)
-        custom_unmap_batch(addrlist, page_size)
+        # custom_unmap_batch(addrlist, page_size) ## no need 
+        # will overwrite the existing mapping; kernel will free pags immediately
+        # cf test-unmap.c and test-unmap-bench.c
+        custom_map_anon_batch(addrlist, page_size)
     else:
         new_pagemask = old_pagemask | new_pagemask
 
@@ -317,9 +341,9 @@ if __name__ == "__main__":
     print('')
         
     # Print a few mapped rows after clearmap
-    print("Mapped rows after clearmap:")
+    print("Mapped rows after clearmap:", end=' ')
     for i in range(min(5, tensor_shape[0])):
-        print(f"{i}, {hex(tensor[i].data_ptr())}:", sep=' ')
+        print(f"{i}, {hex(tensor[i].data_ptr())}:", end=' ')
         print(tensor[i])
 
     print("done")

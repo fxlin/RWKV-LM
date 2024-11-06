@@ -153,7 +153,7 @@ Linux rpi4 5.15.98-rt62-raspi #1 SMP PREEMPT_RT Sun May 7 10:39:42 UTC 2023 aarc
 dd if=/dev/random of=/tmp/existing_file.bin bs=1M count=16
 
 (myenv) robot@rpi4:~/workspace-rwkv/RWKV-LM/RWKV-v5/src/sparse-test$ ./test-unmap-bench --unmap
-before map the file. current pages: 194
+before map the file. current pages: 194   (^^^ could be shared libs, etc 
 map the whole file /tmp/existing_file.bin. total 4096 pages 
 after map the file. current pages: 194
 after touch all mem 
@@ -162,6 +162,19 @@ after create anonymous regions
 current pages: 2385
 after unmap...(+MADV_DONTNEED)
 current pages: 2385
+
+also rpi5, ubuntu 24
+
+xl6yq@rpi5:~/workspace-rwkv/RWKV-LM/RWKV-v5/src/sparse-test$ ./test-unmap-bench
+before map the file. current pages: 288
+map the whole file /tmp/existing_file.bin. total 4096 pages
+after map the file. current pages: 320
+after touch all mem
+current pages: 4416
+after create anonymous regions
+current pages: 2400
+after unmap...(+MADV_DONTNEED)
+current pages: 2400
 
 */
 
