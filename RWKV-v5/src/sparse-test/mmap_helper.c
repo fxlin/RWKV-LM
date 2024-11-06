@@ -29,23 +29,51 @@ int mmap_addresses0(uintptr_t *addresses, size_t num_addresses, size_t length, i
     return 0; 
 }
 
-
+// Function to mmap each address from the passed list
+//   assuming addresses are sorted in ascending order.
+// baesdon mmap_addresses0, but add check to avoid remapping the same page consecutively. 
+//      b/c caller may pass tensor rows belonging to the same page. 
 int mmap_addresses(uintptr_t *addresses, size_t num_addresses, size_t length, int prot, int flags, long *offsets, int fd) {
     void *last_mapped_addr = NULL;
     for (int i = 0; i < num_addresses; i++) {
-        void *addr = (void *)(addresses[i] & ~(0xFFF));
+        void *addr = (void *)(addresses[i] & ~(0xFFF));     // page mask 
         long offset = offsets[i] & ~(0xFFF);
+        // void *addr = (void *)(addresses[i]);
+        // long offset = offsets[i];
 
         if (addr != last_mapped_addr) {
             void *mapped_addr = mmap(addr, length, prot, flags, fd, offset);
             
             if (mapped_addr == MAP_FAILED) {
                 perror("mmap_addresses: mmap failed");
-                printf("i %d, addr %p, length %ld, prot %d, flags %d, fd %d, offset %ld\n", i, addr, length, prot, flags, fd, offsets[i]);
+                printf("i %d, addr %p, length %ld, prot %d, flags %d, fd %d, offset %ld\n", i, addr, length, prot, flags, fd, offset);
                 return -1; 
             } else {
                 // printf("Memory mapped at: %p for requested address: %p with offset: %ld\n", mapped_addr, addr, offsets[i]);
+                perror("mmap_addresses: OK");
+                printf("i %d, addr %p, length %ld, prot %d, flags %d, fd %d, offset %ld\n", i, addr, length, prot, flags, fd, offset);
                 last_mapped_addr = addr;
+            }
+        }
+    }
+    return 0; 
+}
+
+// Function to munmap each address from the passed list
+//   assuming addresses are sorted in ascending order.
+//   has check to avoid unmapping the same page consecutively.
+int munmap_addresses(uintptr_t *addresses, size_t num_addresses, size_t length) {
+    void *last_unmapped_addr = NULL;
+    for (int i = 0; i < num_addresses; i++) {
+        void *addr = (void *)(addresses[i] & ~(0xFFF));
+        if (addr != last_unmapped_addr) {
+            int ret = munmap(addr, length);
+            if (ret == -1) {
+                perror("munmap_addresses: munmap failed");
+                return -1; 
+            } else {
+                // printf("Memory unmapped at: %p\n", addr);
+                last_unmapped_addr = addr;
             }
         }
     }
