@@ -7,4 +7,13 @@ gcc -o sgemv_example sgemv_example.c -lopenblas -O2 -g
 gcc -o test-mmap-overlay test-mmap-overlay.c -lrt  -O2 -g
 # ./mmap_test <file_path> <N>
 
-gcc -shared -o mmap_helper.so -fPIC mmap_helper.c -O2 -g
+gcc -o test-unmap test-unmap.c -O2 -g
+gcc -o test-unmap-bench test-unmap-bench.c -O2 -g
+
+gcc -o test-madvise test-madvise.c -O2 -g
+
+# gcc -shared -o mmap_helper.so -fPIC mmap_helper.c -O2 -g
+
+
+# sudo apt-get install libexplain-dev
+gcc -shared -o mmap_helper.so -fPIC mmap_helper.c -O2 -g -lexplain

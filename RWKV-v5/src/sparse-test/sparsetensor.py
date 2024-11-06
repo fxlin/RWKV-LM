@@ -256,7 +256,8 @@ if __name__ == "__main__":
     dtype = torch.float16  # Data type of the tensor elements
     # dtype = torch.bfloat16  # need some special treatment ... TBD
     # tensor_shape = (4*D, D)  # Shape of the 2D tensor (rows, columns)
-    tensor_shape = (2*D, D)  # Shape of the 2D tensor (rows, columns)
+    # tensor_shape = (2*D, D)  # Shape of the 2D tensor (rows, columns)
+    tensor_shape = (4, D)  # Shape of the 2D tensor (rows, columns)
     file_path = '/tmp/large_tensor_file.bin'  # Path to the tensor file
 
     # Number of rows per page
@@ -318,6 +319,7 @@ if __name__ == "__main__":
     # Print a few mapped rows after clearmap
     print("Mapped rows after clearmap:")
     for i in range(min(5, tensor_shape[0])):
+        print(f"{i}, {hex(tensor[i].data_ptr())}:", sep=' ')
         print(tensor[i])
 
     print("done")
