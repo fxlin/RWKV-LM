@@ -1,5 +1,5 @@
 '''
-pytorch's tensor interface difficult to extend. thus, only ipoement function 
+pytorch's tensor interface difficult to extend. thus, only iplement function 
 for change a mmap tensor's mapping relation. 
 
 cf test-load-sparse-tensors.py
