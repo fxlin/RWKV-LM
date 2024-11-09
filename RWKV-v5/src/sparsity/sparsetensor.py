@@ -362,6 +362,9 @@ def test_convert_to_sparsetensor():
     for i in range(min(5, tensor_shape[0])):
         print(tensor[i])    
         
+    print_memory_usage("after touch")
+
+
 def test_sparsetensor_remap():
     D=1024
     
@@ -471,4 +474,46 @@ Mapped rows after clearmap: 0, 0x7fff6279c000: tensor([0., 0., 0.,  ..., 0., 0.,
 3, 0x7fff6279d800: tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
 done
 
+
+
+############# test convert to sparsetensor
+(myenv) pi@rpi5:~/workspace-rwkv/RWKV-LM/RWKV-v5/src/sparsity $ python3 sparsetensor.py
+test_convert_to_sparsetensor
+before gen tensor - Process memory: 194.48 MB, System memory: 2254.20 MB / 8053.72 MB
+tensor size: 128.0 MB
+after gen tensor - Process memory: 323.19 MB, System memory: 2383.34 MB / 8053.72 MB
+^^^^^^^^^^^^ after creating tensor0, mem goes up
+
+tensor([ 1.2539, -1.2246,  0.3672,  ...,  2.6895,  0.9106,  0.3643],
+       dtype=torch.float16)
+tensor([ 0.0000,  0.4199,  1.0684,  ..., -0.7075, -1.3750, -0.7876],
+       dtype=torch.float16)
+tensor([ 0.2905, -0.2330,  1.5186,  ...,  0.0084,  0.1326, -1.2441],
+       dtype=torch.float16)
+tensor([-1.7861, -0.4448, -1.6465,  ..., -0.0435,  0.9341, -0.9595],
+       dtype=torch.float16)
+tensor([ 0.5581, -0.7197, -0.0156,  ...,  0.2727, -1.8330, -0.3835],
+       dtype=torch.float16)
+before write to file - Process memory: 328.42 MB, System memory: 2383.34 MB / 8053.72 MB
+before init tensor - Process memory: 330.80 MB, System memory: 2382.17 MB / 8053.72 MB
+tensor: torch.Size([16384, 4096]), anon_mmap: 0x7fff3940c000
+after conversion - Process memory: 202.84 MB, System memory: 2254.91 MB / 8053.72 MB
+^^^^^^^^^^^^ after free tensor0, mem goes down
+
+tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+after remap - Process memory: 203.31 MB, System memory: 2256.31 MB / 8053.72 MB
+tensor([ 1.2539, -1.2246,  0.3672,  ...,  2.6895,  0.9106,  0.3643],
+       dtype=torch.float16)
+tensor([ 0.0000,  0.4199,  1.0684,  ..., -0.7075, -1.3750, -0.7876],
+       dtype=torch.float16)
+tensor([ 0.2905, -0.2330,  1.5186,  ...,  0.0084,  0.1326, -1.2441],
+       dtype=torch.float16)
+tensor([-1.7861, -0.4448, -1.6465,  ..., -0.0435,  0.9341, -0.9595],
+       dtype=torch.float16)
+tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+after touch - Process memory: 203.34 MB, System memory: 2335.39 MB / 8053.72 MB
 '''    
