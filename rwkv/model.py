@@ -720,10 +720,12 @@ class RWKV(MyModule):
                     print_need_newline = True
                     prxxx('.', end = '', flush = True)
             
-            print_memory_usage("After conversion")
+            print_memory_usage("XXXXXX After conversion")
+            '''
+            0.1B w/o applying sparsemap to ffn.key: Process memory: 713.33 MB
+            0.1B w/ applying sparsemap to ffn.key:  Process memory: 666.83 MB
+            '''
             ############# --- END conversion of w in place ######
-
-
 
             ##### xzl: load & build cls lookup table. do it AFTER all weights are transposed, converted
             # self.head_l2org_weight: List[torch.Tensor] = []

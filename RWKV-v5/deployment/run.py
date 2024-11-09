@@ -1,7 +1,6 @@
 import os, sys, types, json, math, time
 import numpy as np
 np.set_printoptions(precision=4, suppress=True, linewidth=200)
-import psutil
 
 if os.environ.get('RWKV_CUDA_ON') != '0':
     os.environ["RWKV_JIT_ON"] = '1'
@@ -11,18 +10,12 @@ if os.environ.get('RWKV_CUDA_ON') != '0':
     os.environ["RWKV_CUDA_ON"] = '1' #default
 os.environ["RWKV_CUDA_ON"] = '0' #default
 
-def print_memory_usage(stage):
-    process = psutil.Process(os.getpid())
-    mem_info = process.memory_info()
-    system_mem = psutil.virtual_memory()
-    print(f"{stage} - Process memory: {mem_info.rss / (1024 * 1024):.2f} MB, System memory: {system_mem.used / (1024 * 1024):.2f} MB / {system_mem.total / (1024 * 1024):.2f} MB")
-    # breakpoint()
-
 # print_memory_usage("before init rwkv")      # 25MB
 from rwkv.model import RWKV
 # print_memory_usage("after init rwkv")      # 200MB
 
 from rwkv.utils import PIPELINE, PIPELINE_ARGS
+from rwkv.utils import print_memory_usage
 
 models = [
         #'models/official-0.1b',
@@ -62,6 +55,7 @@ if __name__ == "__main__":
                          quant_bit=quant_bit, quant_map=quant_map, mlp_map=mlp_map,
                          load_token_cls=cls_path)
         #print(f'Loading model - {model_path}')
+        print_memory_usage("model loaded")      # 660MB
         pipeline = PIPELINE(model, "rwkv_vocab_v20230424")
 
         # borrow from RWKV_CHAT
@@ -78,6 +72,9 @@ if __name__ == "__main__":
         total_ffn_t = 0
         total_cls_t = 0
         
+        print_memory_usage("pipeline created")
+        breakpoint()
+
         ctx = "\nAlice was so tired when she got back home so she went"
         iterations = 5
         for _ in range(iterations):
