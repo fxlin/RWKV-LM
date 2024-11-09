@@ -2,7 +2,9 @@
 pytorch's tensor interface difficult to extend. thus, only iplement function 
 for change a mmap tensor's mapping relation. 
 
-test: python3 sparsetensor.py
+test: 
+mkdir -p ~/tmp    # b/c we need a disk file (not just /tmp/
+python3 sparsetensor.py
 
 tested on rpi4 (ubuntu 22),rpi5 (raspbianos)
 sample output: see EOF
@@ -17,6 +19,15 @@ import random
 import mmap
 import os
 import torch.autograd.profiler as profiler
+
+import psutil
+def print_memory_usage(stage):
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    system_mem = psutil.virtual_memory()
+    print(f"{stage} - Process memory: {mem_info.rss / (1024 * 1024):.2f} MB, System memory: {system_mem.used / (1024 * 1024):.2f} MB / {system_mem.total / (1024 * 1024):.2f} MB")
+    # breakpoint()
+
 
 '''
 In Python, you can use the mmap module to map memory, but by default, the module
@@ -165,6 +176,35 @@ def sparsetensor_init(file_path, tensor_shape, dtype):
         # mapped_tensor.data_ptr() should be the same as anon_mmap
         return mapped_tensor, anon_mmap, torch.zeros(tensor_shape[0], dtype=torch.bool)
 
+
+import tempfile, gc
+'''
+convert a dense tensor, already in mem, to a sparsemap tensor backed by file
+we take a file_path, insread of making a temp one internally, b/c the file_path will be used again 
+  in sparsetensor_remap().
+NB: @file_path shall be backed by disk 
+'''
+def convert_to_sparsemap_tensor(file_path, tensor, do_gc=True):
+    print_memory_usage("before write to file")
+    dtype=tensor.dtype
+    orgshape = tensor.shape
+    # write back to disk 
+    with open(file_path, "wb") as f:
+        if dtype==torch.bfloat16:
+            f.write(tensor.numpy().contiguous().view(torch.uint16).numpy().tobytes())  # works 
+        else: 
+            f.write(tensor.numpy().tobytes())
+    
+    # free org tensor
+    del tensor
+    if do_gc:
+        gc.collect()
+
+    print_memory_usage("before init tensor")
+    # create a mmap tensor backed by the file 
+    tensor1, anon_mmap, mask = sparsetensor_init(file_path, orgshape, dtype)    
+    return tensor1, anon_mmap, mask
+
 '''
 take a tensor, unmap and remap its rows 
 old_mask, new_mask: each shape (D,) with 1s and 0s. 1 means in core. D=tensor_shape[0]
@@ -253,7 +293,6 @@ def sparsetensor_clearmap(tensor, old_mask):
 
 ###############################################################################
 # test code
-
 def create_random_tensor_and_save(file_path, shape, dtype=torch.float32):
     """
     Creates a tensor with random data and writes it to a binary file.
@@ -273,12 +312,57 @@ def create_random_tensor_and_save(file_path, shape, dtype=torch.float32):
     # Open the file in binary write mode and save the raw tensor data
     with open(file_path, 'wb') as f:
         # Write the raw data (tensor as bytes) to the file
-        f.write(random_tensor.numpy().tobytes())
+        if dtype==torch.bfloat16:
+            # showcses how to deal with bfloat16, unsupported by numpy as of ubuntu 2204
+            f.write(random_tensor.numpy().contiguous().view(torch.uint16).numpy().tobytes())  # works 
+        else: 
+            f.write(random_tensor.numpy().tobytes())
 
     print(f"Tensor with shape {shape} and dtype {dtype} saved to {file_path}")
 
-if __name__ == "__main__":
+def test_convert_to_sparsetensor():
+    print("test_convert_to_sparsetensor")
+    file_path="/home/pi/large_tensor_file.bin"
 
+    # D=1024
+    D=4096
+    tensor_shape = (4*D, D)
+    dtype = torch.float16
+
+    print_memory_usage("before gen tensor")    
+    print(f"tensor size: {torch._utils._element_size(dtype) * tensor_shape[0] * tensor_shape[1]/1024/1024} MB")
+
+    tensor0=torch.randn(tensor_shape, dtype=dtype)
+
+    # Print a few mapped rows before remap
+    # print("Mapped rows before conversion:")
+    print_memory_usage("after gen tensor")
+    for i in range(min(5, tensor_shape[0])):
+        print(tensor0[i])
+
+    tensor, anon_mmap, mask = convert_to_sparsemap_tensor(file_path, tensor0)
+    print(f"tensor: {tensor.shape}, anon_mmap: {hex(anon_mmap)}")
+    del tensor0
+    gc.collect()
+    print_memory_usage("after conversion")
+
+    # print("rows after conversion, before remap:")
+    for i in range(min(5, tensor_shape[0])):
+        print(tensor[i])
+
+    newmask=torch.zeros(tensor_shape[0], dtype=torch.bool)
+    newmask[0] = True
+    newmask[1] = True
+    newmask[2] = True
+    mask = sparsetensor_remap(tensor, file_path, mask, newmask)
+
+    # print("rows after conversion, after remap:")
+    print_memory_usage("after remap")
+
+    for i in range(min(5, tensor_shape[0])):
+        print(tensor[i])    
+        
+def test_sparsetensor_remap():
     D=1024
     
     # dtype = torch.float32  # Data type of the tensor elements
@@ -287,7 +371,7 @@ if __name__ == "__main__":
     # tensor_shape = (4*D, D)  # Shape of the 2D tensor (rows, columns)
     # tensor_shape = (2*D, D)  # Shape of the 2D tensor (rows, columns)
     tensor_shape = (4, D)  # Shape of the 2D tensor (rows, columns)
-    file_path = '/tmp/large_tensor_file.bin'  # Path to the tensor file
+    file_path = '~/tmp/large_tensor_file.bin'  # Path to the tensor file
 
     # Number of rows per page
     group_size = 4096 // D // torch._utils._element_size(dtype)  
@@ -352,6 +436,10 @@ if __name__ == "__main__":
         print(tensor[i])
 
     print("done")
+                
+if __name__ == "__main__":
+    # test_sparsetensor_remap()
+    test_convert_to_sparsetensor()
 
 
 '''

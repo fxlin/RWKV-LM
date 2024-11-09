@@ -374,7 +374,7 @@ class RWKV(MyModule):
                 del w['_version']
                 del w['_rescale_layer']
 
-            # xzl: make "emb" memory mapped (load on demand
+            # xzl: make "emb" memory mapped (load on demand, strictly not a sparse tensor over overlapped mappings
             print_memory_usage("before del emb")
             dtype = w['emb.weight'].dtype
             orgshape = w['emb.weight'].shape
@@ -512,7 +512,7 @@ class RWKV(MyModule):
                 prxxx(f"{n}-{strategy[n].device}-{str(strategy[n].atype).replace('torch.','')}-{str(strategy[n].wtype).replace('torch.','')}{'-stream' if strategy[n].stream else ''}",end=' ')
             prxxx()
 
-            ####################### Load weights to self.w
+            ####################### convert weights in self.w in-place
             # xzl: below - convert weights per layer strategy...
             if not ALREADY_CONVERTED:
                 try: # precompute embedding         xzl: fuse layers?? (emb + ln0?
@@ -553,6 +553,7 @@ class RWKV(MyModule):
                     w[x+'2b']   = quantize(w[x].t(), 2)   # a tuple
                     w[x+'1b']   = quantize(w[x].t(), 1)   # a tuple
 
+                # xzl: below, continue to conversion....??
                 if not ALREADY_CONVERTED:
                     if self.RESCALE_LAYER > 0:  # xzl we didnt touch these..
                         if 'att.output.weight' in x:
@@ -631,6 +632,11 @@ class RWKV(MyModule):
                         else:
                             w[x] = w[x].to(dtype=ATYPE)
                 
+                # xzl: below, convert ffn.k/v to sparsemap tensors ...
+                if self.version in [5.8, 5.9] and mlp_map: # our mod, w/ sparsity predictor
+                    if 'ffn.key.weight' in x:
+
+
                 # xzl: below, policy for deciding weights contig in cpu mem. 
                 #   special treatment for "stream" mode (cpu->gpu)
                 if convert_and_save_and_exit == None:
@@ -655,7 +661,7 @@ class RWKV(MyModule):
                         except:
                             pass
 
-                if 'ffn.value.weight' in x:     # xzl: reach the last weight of a layer??? so GC??
+                if 'ffn.value.weight' in x:     # xzl: reach the last weight of a layer, so GC (b/c some weight in self.x were deleted
                     gc.collect()
                     if 'cuda' in args.strategy_string:
                         torch.cuda.empty_cache()
