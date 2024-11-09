@@ -2,6 +2,11 @@
 pytorch's tensor interface difficult to extend. thus, only iplement function 
 for change a mmap tensor's mapping relation. 
 
+test: python3 sparsetensor.py
+
+tested on rpi4 (ubuntu 22),rpi5 (raspbianos)
+sample output: see EOF
+
 cf test-load-sparse-tensors.py
 '''
 
@@ -347,3 +352,35 @@ if __name__ == "__main__":
         print(tensor[i])
 
     print("done")
+
+
+'''
+(myenv) pi@rpi5:~/workspace-rwkv/RWKV-LM/RWKV-v5/src/sparse-test $ python3 sparsetensor.py 
+Tensor with shape (4, 1024) and dtype torch.float16 saved to /tmp/large_tensor_file.bin
+created tensor file
+row size in bytes: 2048
+tensor: torch.Size([4, 1024]), anon_mmap: 0x7fff6279c000
+mask: tensor([False, False, False, False])
+Mapped rows before remap:
+tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+requested Mask (grouped):
+01 00 Mapped rows after remap:
+tensor(False) tensor([42., 42., 42.,  ..., 42., 42., 42.], dtype=torch.float16)
+tensor(True) tensor([42., 42., 42.,  ..., 42., 42., 42.], dtype=torch.float16)
+tensor(False) tensor([42., 42., 42.,  ..., 42., 42., 42.], dtype=torch.float16)
+tensor(False) tensor([42., 42., 42.,  ..., 42., 42., 42.], dtype=torch.float16)
+updated mask: 1111
+updated Mask (grouped):
+11 11 
+after sparsetensor_clearmap -- updated Mask (grouped):
+00 00 
+Mapped rows after clearmap: 0, 0x7fff6279c000: tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+1, 0x7fff6279c800: tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+2, 0x7fff6279d000: tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+3, 0x7fff6279d800: tensor([0., 0., 0.,  ..., 0., 0., 0.], dtype=torch.float16)
+done
+
+'''    
