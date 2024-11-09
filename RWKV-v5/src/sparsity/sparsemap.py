@@ -177,14 +177,15 @@ def sparsetensor_init(file_path, tensor_shape, dtype):
         return mapped_tensor, anon_mmap, torch.zeros(tensor_shape[0], dtype=torch.bool)
 
 
-import tempfile, gc
 '''
 convert a dense tensor, already in mem, to a sparsemap tensor backed by file
 we take a file_path, insread of making a temp one internally, b/c the file_path will be used again 
   in sparsetensor_remap().
 NB: @file_path shall be backed by disk 
+
+the caller shall free the original tensor (via gc)
 '''
-def convert_to_sparsemap_tensor(file_path, tensor, do_gc=True):
+def convert_to_sparsemap_tensor(file_path, tensor):
     print_memory_usage("before write to file")
     dtype=tensor.dtype
     orgshape = tensor.shape
@@ -195,10 +196,8 @@ def convert_to_sparsemap_tensor(file_path, tensor, do_gc=True):
         else: 
             f.write(tensor.numpy().tobytes())
     
-    # free org tensor
-    del tensor
-    if do_gc:
-        gc.collect()
+    # free org tensor   .. not useful, reference still in caller
+    # del tensor
 
     print_memory_usage("before init tensor")
     # create a mmap tensor backed by the file 
@@ -320,6 +319,7 @@ def create_random_tensor_and_save(file_path, shape, dtype=torch.float32):
 
     print(f"Tensor with shape {shape} and dtype {dtype} saved to {file_path}")
 
+import gc
 def test_convert_to_sparsetensor():
     print("test_convert_to_sparsetensor")
     file_path="/home/pi/large_tensor_file.bin"
