@@ -54,17 +54,17 @@ import os
 # model_path='/data/models/0.1b-pre-x59-16x-1451'
 # model_path='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-pretrain-x59/from-hpc/rwkv-976'
 
-# model_path='/data/models/pi-deployment/01b-pre-x52-1455'
+model_path='/data/models/pi-deployment/01b-pre-x52-1455'        # works on opi0
 # model_path='/data/models/pi-deployment/01b-pre-x58-512'
 
 # model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
 # model_path='/data/models/pi-deployment/01b-pre-x59-976'
-# model_path='/data/models/pi-deployment/04b-tunefull-x58-562'
+# model_path='/data/models/pi-deployment/04b-tunefull-x58-562'   # works on opi0
 # model_path='/data/models/pi-deployment/04b-pre-x59-2405'
 
 # model_path='/data/models/rwkv-04b-pre-x59-860'
 
-model_path='/data/models/pi-deployment/1b5-pre-x59-929'
+# model_path='/data/models/pi-deployment/1b5-pre-x59-929'
 # model_path='/data/models/pi-deployment/01b-pre-x59-CLS-TEST'
 
 # #Only head.l1 tuned. KL loss (good
@@ -211,6 +211,7 @@ x59     01b-pre-x59-976         3.1
 orange pi zero2w (Allwinner H618; quad CortexA53, 1.5GHz; 4GB DRAM)
                         tok/sec
 01b-pre-x52-1455        4.96
+01b-pre-x52-1455 fp16i8 (<1) # very slow, and mem saving is not significant?
 01b-pre-x59-976         4.72
 04b-tunefull-x58-562    2.42    
 04b-pre-x59-860         2.30         
