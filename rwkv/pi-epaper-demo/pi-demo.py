@@ -122,7 +122,7 @@ class EInkDisplay:
         # self.base_draw.text((10, 10), "Title", font=self.font_title, fill=0)  # Draw the title at the top
 
         # image as background, the image file orientation will affect the coordinate system
-        self.base_image = Image.open(os.path.join(picdir, "2in13/Photo_2-3icon.bmp")).rotate(-90, expand=True)
+        self.base_image = Image.open(os.path.join(picdir, "2in13/Photo_2-3iconX.bmp")).rotate(-90, expand=True)
 
         self.base_draw = ImageDraw.Draw(self.base_image)
         # self.base_image.paste(newimage, (0, 0))
@@ -691,11 +691,23 @@ try:
                 current_prompt = random.choice(prompt_list)
                 eink_display.print_token_scroll(current_prompt.replace('\n', ''))
             # center x,y ~= 80,120
-            if touchx > 70 and touchx < 90 and touchy > 110:
+            elif touchx > 70 and touchx < 90 and touchy > 110:
                 # print("gen")
                 post_sys_msg(f"Generating...")
                 model_gen(current_prompt)
-            
+            # x,y ~= 120,120, clear
+            elif touchx > 110 and touchx < 130 and touchy > 110:
+                print("quit")
+                post_sys_msg("Quitting...")
+                eink_display.stop()
+                flag_t = 0
+                eink_display.epd.Clear(0xFF)
+                eink_display.epd.sleep()
+                time.sleep(1)
+                t.join()
+                epd2in13_V4.epdconfig.module_exit()
+                exit()
+
             # scroll controls 
             # top-right corner
             elif touchx > eink_display.yres *7//8 and touchy < eink_display.yres // 2:
@@ -730,7 +742,7 @@ except KeyboardInterrupt:
     eink_display.stop()     # render thread to quit 
     flag_t = 0          # touch thread to quit 
     eink_display.epd.sleep()
-    time.sleep(2)
+    time.sleep(1)
     t.join()           # wait for touch thread to quit
     eink_display.epd.Dev_exit()
     exit()
