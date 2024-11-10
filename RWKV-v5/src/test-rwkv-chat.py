@@ -102,8 +102,8 @@ else:
     if is_amd_cpu():
         strategy='cpu fp32'  # amd cpu lacks hard fp16...
     else:
-        strategy='cpu fp16'
-    # strategy='cpu fp16i8'
+        # strategy='cpu fp16'
+        strategy='cpu fp16i8'
 
 # use below to quantize model & save
 if False: 
@@ -181,9 +181,9 @@ speed test
 rpi5 (4GB DRAM, supports fp16 in neon)
                                 tok/sec
 x52     01b-pre-x52-1455        15.3                
-    fp16i8 v3                       ~12 tok/sec  
+    quant fp16i8 v3                       ~12 tok/sec  
             (reason: openmp multithreading straggler?. occassionally, mm8 takes 3x-4x longer to finish)
-    fp16i8 v4                       ~10 tok/sec  
+    quant fp16i8 v4                       ~10 tok/sec  
             (even for M=N=768, 2t is still benefitical; better than 1t)
                                  
 x59     01b-pre-x59-976         15.02 (old: 10.5
@@ -191,19 +191,19 @@ x59     01b-pre-x59-976         15.02 (old: 10.5
 
 04b official (x52)             6.62    
     04b-pre-x59-2405           6.86         (old -- 3.36 (not too bad
-    fp16i8 v3                           (old -- 3.0 (not too bad)
+    quant fp16i8 v3                           (old -- 3.0 (not too bad)
 
 1b5  1b5-pre-x59-929   (on rpi5 8GB RAM) 3 tok/s
-
+     quant fp16i8 v3
 
 --------------
 rpi4  (BCM2711, quad Cortex-A72, 1.5GHz, 8GB)
 (only support fp32 in neon)
                                 tok/sec
 x52     01b-pre-x52-1455        5.1      
-    fp16i8                       .4 (very slow)
+    quant fp16i8                       .4 (very slow)
 x59     01b-pre-x59-976         3.1                                
-    fp16i8                      .45 (very slow)
+    quant fp16i8                      .45 (very slow)
 
     1b5                          .26 (slow)
 
