@@ -63,6 +63,7 @@ if os.environ.get('RWKV_NEON_ON') == '1':
     # from .neon.mm8_neon import *
     # import .neon.mm8_neon as mm8_neon
   
+    # guess: which boards support native fp16
     rpiver = is_raspberry_pi()
     if rpiver and '5' in rpiver:
         config_neon_fp16 = True
@@ -668,8 +669,9 @@ class RWKV(MyModule):
             if 'head_l1.weight' in w: # use compressed cls heads                
                 import numpy as np
                 args.head_K = 200    # XXX
-                # md5sum: 1ba8dc5e...
+                '''
                 if is_raspberry_pi() or is_odroid():
+                    # md5sum: 1ba8dc5e...
                     args.load_token_cls='/data/models/pi-deployment/rwkv-823-cls.npy'
                 else: 
                     # args.load_token_cls='/data/home/bfr4xr/RWKV-LM/RWKV-v5/out/01b-pre-x59-8x-cls/from-hpc/rwkv-823-cls.npy'
@@ -677,6 +679,7 @@ class RWKV(MyModule):
                     #args.load_token_cls='models/01b-x59-cls.npy'
                     #args.load_token_cls='models/04b-x59-cls.npy'
                     pass
+                '''
                 
                 K=args.head_K
                 labels = np.load(args.load_token_cls)
@@ -732,7 +735,14 @@ class RWKV(MyModule):
                 # avoid indexing "w" (the model state dict) inside _retrieve_value3(), which 
                 # prevents it from using torch.script... 
                 self.head_l1_weight = w['head_l1.weight']
-                self.vocab = w['head.weight'].shape[1]   # shape D,vocab                    
+                self.vocab = w['head.weight'].shape[1]   # shape D,vocab
+
+                # we no longer need the original head weight, delete it to save memory
+                x='head.weight'
+                print(f"will delete: {x}, shape: {w[x].shape}, size: {w[x].nelement() * w[x].element_size() / 1024:.2f} KB")
+                del orghead     # must do this to del reference
+                del w['head.weight']
+                gc.collect()
 
             prxxx("parameter size: ", f"{total_parameter_size / MiB:.3f} MB")
             

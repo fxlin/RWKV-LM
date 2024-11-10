@@ -9,6 +9,15 @@ import torch
 
 from torch.nn import functional as F
 
+
+import psutil
+def print_memory_usage(stage):
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    system_mem = psutil.virtual_memory()
+    print(f"{stage} - Process memory: {mem_info.rss / (1024 * 1024):.2f} MB, System memory: {system_mem.used / (1024 * 1024):.2f} MB / {system_mem.total / (1024 * 1024):.2f} MB")
+    # breakpoint()
+
 class PIPELINE_ARGS():
     def __init__(self, temperature=1.0, top_p=0.85, top_k=0, alpha_frequency=0.2, alpha_presence=0.2, alpha_decay=0.996, token_ban=[], token_stop=[], chunk_len=256):
         self.temperature = temperature
