@@ -67,6 +67,7 @@ if os.environ.get('RWKV_NEON_ON') == '1':
     rpiver = is_raspberry_pi()
     if rpiver and '5' in rpiver:
         config_neon_fp16 = True
+
     # TBD: orange pi, Apple silicon 
 
 '''
@@ -182,9 +183,12 @@ elif config_has_neon:  # neon, but no fp16 native support, fallback to fp32
     # @MyStatic
     @torch.jit.ignore
     def mm8_seq(x, w, mx, rx, my, ry):
-        if x.dtype==torch.float32: #assume all other tensors (but w) are fp32. no conversion 
+        if x.dtype==torch.float32: 
+            #assume all other tensors (but w) are fp32. no conversion 
             return mm8_neon.mm_seq_fp32i8(x, w, mx, rx, my, ry)
         else:
+            # all tensors are fp16.
+            # conversion here can be costly?
             return mm8_neon.mm_seq_fp32i8(
                 x.to(torch.float),
                 w,

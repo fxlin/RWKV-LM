@@ -323,6 +323,7 @@ start_time = time.time()
 result = x @ w
 end_time = time.time()
 print(f">>> Execution time for fp16 noquant: {(end_time - start_time) * 1000:.3f} ms")
+print("\n")
 
 if False:
     print(f"torch y: {y[:10]}")
@@ -405,6 +406,14 @@ y_cpp32 = mm8_neon.mm_seq_fp32i8(
 end_time = time.time()
 print(f"Execution time for mm_seq_fp32i8: {(end_time - start_time) * 1000:.3f} ms")
 
+# Measure time for fp16 no quant (problematic?? so slow
+w_fp16 = w_uint8.to(torch.float16)
+start_time = time.time()
+result = x_fp16 @ w_fp16
+end_time = time.time()
+print(f">>> Execution time for fp16 noquant: {(end_time - start_time) * 1000:.3f} ms")
+print("\n")
+
 y_torch_f32 = y_torch.to(torch.float32)
 # Compute the relative differences
 relative_differences = torch.abs(y_torch_f32 - y_cpp) / torch.abs(y_torch_f32)
@@ -462,7 +471,7 @@ Execution time for torch_mm8_one: 26.366 ms
 Execution time for mm_one_fp16i8    v1: 8.664 ms
 Execution time for mm_one_fp16i8    v2: 2.563 ms
 Execution time for mm_one_fp16i8    v3: 0.723 ms   (~30x improvement)
-Execution time for mm_one_fp32i8:   4.964 ms
+Execution time for mm_one_fp32i8:   4.964 ms    (bad
 
 N = 768, M = 65536
 Execution time for torch_mm8_one: 379.489 ms
