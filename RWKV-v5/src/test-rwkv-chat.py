@@ -57,12 +57,12 @@ import os
 # model_path='/data/models/pi-deployment/01b-pre-x52-1455'        # works on opi0
 # model_path='/data/models/pi-deployment/01b-pre-x58-512'
 
-# model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
+#model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
 # model_path='/data/models/pi-deployment/01b-pre-x59-976'
 # model_path='/data/models/pi-deployment/04b-tunefull-x58-562'   # works on opi0
 # model_path='/data/models/pi-deployment/04b-pre-x59-2405'
 
-# model_path='/data/models/pi-deployment/1b5-pre-x59-929'
+model_path='/data/models/pi-deployment/1b5-pre-x59-929'
 # model_path='/data/models/pi-deployment/01b-pre-x59-CLS-TEST'
 
 # has mlp, cls (need to pass in hyperparam)

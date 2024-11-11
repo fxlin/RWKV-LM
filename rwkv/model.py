@@ -54,8 +54,10 @@ from .arm_plat import is_raspberry_pi, is_odroid
 # import arm_plat
 
 # these will affect how mm8 is implemented on ARM cores
-config_has_neon = False     #neon, with or w/o fp16 support
-config_neon_fp16 = False    # neon with native fp16 support
+# if native fp16 simd, dequant & compute w/ fp16 simd
+# if no fp16, dequant to fp32 and compute w/ fp32 simd
+config_neon_fp16 = False    # neon with native fp16 support. dequant & compute w/ fp16 simd
+config_has_neon = False     # neon, with or w/o fp16 support. 
 
 if os.environ.get('RWKV_NEON_ON') == '1':
     config_has_neon = True  

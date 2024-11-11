@@ -5,15 +5,17 @@ import subprocess
 
 mcpu = None
 march = None
+flag = ''
 
 # Run 'lscpu' command to check for the CPU model
 cpu_info = subprocess.check_output("lscpu", shell=True).decode()
 if "A53" in cpu_info:   # opi0
     mcpu = "cortex-a53"
-    march = "armv8-a"            
+    march = "armv8-a"
 elif "A76" in cpu_info: # rpi5
     mcpu = "cortex-a76"
     march = "armv8.2-a+fp16"
+    flag = "-DHAS_NEON_FP16"
 elif "A72" in cpu_info:  # rpi4
     mcpu = "cortex-a72"
     march = "armv8-a"

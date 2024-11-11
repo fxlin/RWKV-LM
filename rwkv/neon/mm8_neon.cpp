@@ -16,6 +16,7 @@
 
 // #define DEBUG_KERNEL 1 //uncomment to enable debug prints
 
+#ifdef HAS_NEON_FP16
 // cf: rwkv/cuda/operators.cu kernel_mm_one_fp16i8
 // omp, not caring much about memory locality
 // works
@@ -410,7 +411,7 @@ void kernel_mm_one_fp16i8_v3_1c(
         }
     }
 }
-
+#endif      // HAS_NEON_FP16
 
 #if 0
 // bad. not broadcasting 
@@ -600,6 +601,7 @@ void kernel_mm_one_fp32i8(
     }
 }
 
+#ifdef HAS_NEON_FP16
 // cf: rwkv/cuda/operators.cu  kernel_mm_seq_fp16i8()
 void kernel_mm_seq_fp16i8(
     const int B, const int N, const int M,
@@ -705,6 +707,7 @@ void kernel_mm_seq_fp16i8(
         }
     }
 }
+#endif //HAS_NEON_FP16
 
 void kernel_mm_seq_fp32i8(
     const int B, const int N, const int M,
@@ -834,6 +837,63 @@ torch::Tensor mm_one_fp32i8(
     return y;
 }
 
+
+torch::Tensor mm_seq_fp32i8(
+    torch::Tensor x_fp32,
+    torch::Tensor w_uint8,
+    torch::Tensor mx_fp32,
+    torch::Tensor rx_fp32,
+    torch::Tensor my_fp32,
+    torch::Tensor ry_fp32)
+{
+    // Ensure tensors are contiguous and on CPU
+    x_fp32 = x_fp32.contiguous();
+    w_uint8 = w_uint8.contiguous();
+    mx_fp32 = mx_fp32.contiguous();
+    rx_fp32 = rx_fp32.contiguous();
+    my_fp32 = my_fp32.contiguous().view(-1); // Ensure shape is (N,)
+    ry_fp32 = ry_fp32.contiguous().view(-1); // Ensure shape is (N,)
+
+    // Validate tensor data types
+    TORCH_CHECK(x_fp32.dtype() == torch::kFloat32, "x_fp32 must be Float32");
+    TORCH_CHECK(w_uint8.dtype() == torch::kUInt8, "w_uint8 must be UInt8");
+    TORCH_CHECK(mx_fp32.dtype() == torch::kFloat32, "mx_fp32 must be Float32");
+    TORCH_CHECK(rx_fp32.dtype() == torch::kFloat32, "rx_fp32 must be Float32");
+    TORCH_CHECK(my_fp32.dtype() == torch::kFloat32, "my_fp32 must be Float32");
+    TORCH_CHECK(ry_fp32.dtype() == torch::kFloat32, "ry_fp32 must be Float32");
+
+    // Get dimensions
+    int B = x_fp32.size(0);
+    int N = x_fp32.size(1);
+    int M = w_uint8.size(1);
+
+    // Strides
+    int x_stride = x_fp32.stride(0);
+    int y_stride = M; // Output y will have shape (B, M)
+    int w_stride = M; // Assuming w is row-major and contiguous
+
+    // Ensure that w is contiguous along the columns
+    TORCH_CHECK(w_uint8.stride(1) == 1, "w_uint8 must be contiguous along the inner dimension");
+
+    // Allocate output tensor y
+    torch::Tensor y = torch::empty({B, M}, torch::dtype(torch::kFloat32));
+
+    // Call the kernel function
+    kernel_mm_seq_fp32i8(
+        B, N, M,
+        x_fp32.data_ptr<float>(), x_stride,
+        w_uint8.data_ptr<uint8_t>(), w_stride,
+        mx_fp32.data_ptr<float>(),
+        rx_fp32.data_ptr<float>(),
+        my_fp32.data_ptr<float>(),
+        ry_fp32.data_ptr<float>(),
+        y.data_ptr<float>(), y_stride
+    );
+
+    return y;
+}
+
+#ifdef HAS_NEON_FP16
 torch::Tensor mm_one_fp16i8(
     torch::Tensor x_fp16,
     torch::Tensor w_uint8,
@@ -1009,65 +1069,14 @@ torch::Tensor mm_seq_fp16i8(
 
     return y;
 }
+#endif //HAS_NEON_FP16
 
-torch::Tensor mm_seq_fp32i8(
-    torch::Tensor x_fp32,
-    torch::Tensor w_uint8,
-    torch::Tensor mx_fp32,
-    torch::Tensor rx_fp32,
-    torch::Tensor my_fp32,
-    torch::Tensor ry_fp32)
-{
-    // Ensure tensors are contiguous and on CPU
-    x_fp32 = x_fp32.contiguous();
-    w_uint8 = w_uint8.contiguous();
-    mx_fp32 = mx_fp32.contiguous();
-    rx_fp32 = rx_fp32.contiguous();
-    my_fp32 = my_fp32.contiguous().view(-1); // Ensure shape is (N,)
-    ry_fp32 = ry_fp32.contiguous().view(-1); // Ensure shape is (N,)
-
-    // Validate tensor data types
-    TORCH_CHECK(x_fp32.dtype() == torch::kFloat32, "x_fp32 must be Float32");
-    TORCH_CHECK(w_uint8.dtype() == torch::kUInt8, "w_uint8 must be UInt8");
-    TORCH_CHECK(mx_fp32.dtype() == torch::kFloat32, "mx_fp32 must be Float32");
-    TORCH_CHECK(rx_fp32.dtype() == torch::kFloat32, "rx_fp32 must be Float32");
-    TORCH_CHECK(my_fp32.dtype() == torch::kFloat32, "my_fp32 must be Float32");
-    TORCH_CHECK(ry_fp32.dtype() == torch::kFloat32, "ry_fp32 must be Float32");
-
-    // Get dimensions
-    int B = x_fp32.size(0);
-    int N = x_fp32.size(1);
-    int M = w_uint8.size(1);
-
-    // Strides
-    int x_stride = x_fp32.stride(0);
-    int y_stride = M; // Output y will have shape (B, M)
-    int w_stride = M; // Assuming w is row-major and contiguous
-
-    // Ensure that w is contiguous along the columns
-    TORCH_CHECK(w_uint8.stride(1) == 1, "w_uint8 must be contiguous along the inner dimension");
-
-    // Allocate output tensor y
-    torch::Tensor y = torch::empty({B, M}, torch::dtype(torch::kFloat32));
-
-    // Call the kernel function
-    kernel_mm_seq_fp32i8(
-        B, N, M,
-        x_fp32.data_ptr<float>(), x_stride,
-        w_uint8.data_ptr<uint8_t>(), w_stride,
-        mx_fp32.data_ptr<float>(),
-        rx_fp32.data_ptr<float>(),
-        my_fp32.data_ptr<float>(),
-        ry_fp32.data_ptr<float>(),
-        y.data_ptr<float>(), y_stride
-    );
-
-    return y;
-}
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+#ifdef HAS_NEON_FP16    
     m.def("mm_one_fp16i8", &mm_one_fp16i8, "Matrix multiplication with int8 weights and float16 inputs (ARM Cortex-A76 optimized)");
     m.def("mm_seq_fp16i8", &mm_seq_fp16i8, "Sequential matrix multiplication with int8 weights and float16 inputs (ARM Cortex-A76 optimized)");
+#endif //HAS_NEON_FP16    
     m.def("mm_one_fp32i8", &mm_one_fp32i8, "Matrix multiplication with int8 weights and float32 inputs");
     m.def("mm_seq_fp32i8", &mm_seq_fp32i8, "Sequential matrix multiplication with int8 weights and float32 inputs");
 }
