@@ -1067,7 +1067,7 @@ torch::Tensor mm_seq_fp32i8(
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("mm_one_fp16i8", &mm_one_fp16i8, "Matrix multiplication with int8 weights and float16 inputs (ARM Cortex-A76 optimized)");
-    m.def("mm_one_fp32i8", &mm_one_fp32i8, "Matrix multiplication with int8 weights and float32 inputs");
     m.def("mm_seq_fp16i8", &mm_seq_fp16i8, "Sequential matrix multiplication with int8 weights and float16 inputs (ARM Cortex-A76 optimized)");
+    m.def("mm_one_fp32i8", &mm_one_fp32i8, "Matrix multiplication with int8 weights and float32 inputs");
     m.def("mm_seq_fp32i8", &mm_seq_fp32i8, "Sequential matrix multiplication with int8 weights and float32 inputs");
 }
