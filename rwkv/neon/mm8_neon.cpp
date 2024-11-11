@@ -743,6 +743,7 @@ void kernel_mm_seq_fp32i8(
             // Pointer to the start of the current row in w
             const uint8_t* w_row_ptr = &w[j * w_stride];
 
+            // Preload rx_fp32 and mx_fp32 values for the k loop
             int k = 0;
             int k_unroll = 4; // Process 4 elements at a time
             for (; k <= M - k_unroll; k += k_unroll) {
@@ -750,8 +751,9 @@ void kernel_mm_seq_fp32i8(
                 uint8x8_t w_u8 = vld1_u8(&w_row_ptr[k]); // Load 8 bytes
                 uint16x8_t w_u16 = vmovl_u8(w_u8);       // Expand to uint16x8_t
                 uint16x4_t w_u16_low = vget_low_u16(w_u16); // Lower 4 elements
-                uint32x4_t w_u32 = vmovl_u16(w_u16_low); // Expand to uint32x4_t
-                float32x4_t w_vec = vcvtq_f32_u32(w_u32); // Convert to float32
+                float32x4_t w_vec = vcvtq_f32_u16(w_u16_low); // Convert to float32
+
+                // Apply dequantization (adjust for scale)
                 float32x4_t half_vec = vdupq_n_f32(0.5f);
                 w_vec = vaddq_f32(w_vec, half_vec); // w_vec = w_vec + 0.5
 
@@ -786,7 +788,6 @@ void kernel_mm_seq_fp32i8(
         }
     }
 }
-
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Python binding

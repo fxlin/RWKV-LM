@@ -353,6 +353,8 @@ B=4
 N = 1024
 M = int(N * 3.5)
 
+print(f"B={B}, N = {N}, M = {M}")
+
 x_fp16 = torch.randn(B, N, dtype=torch.float16)
 w_uint8 = torch.randint(0, 256, (N, M), dtype=torch.uint8)
 mx_fp16 = torch.randn(M, dtype=torch.float16)
@@ -365,19 +367,6 @@ start_time = time.time()
 y_torch = torch_mm8_seq(x_fp16, w_uint8, mx_fp16, rx_fp16, my_fp16, ry_fp16)
 end_time = time.time()
 print(f"Execution time for torch_mm8_seq: {(end_time - start_time) * 1000:.3f} ms")
-
-# Measure execution time for mm_seq_fp16i8
-# start_time = time.time()
-# y_cpp = mm8_neon.mm_seq_fp16i8(
-#     x_fp16,
-#     w_uint8,
-#     mx_fp16,
-#     rx_fp16,
-#     my_fp16,
-#     ry_fp16
-# )
-# end_time = time.time()
-# print(f"Execution time for mm_seq_fp16i8: {(end_time - start_time) * 1000:.3f} ms")
 
 # Measure execution time for mm_seq_fp32i8
 start_time = time.time()
@@ -393,7 +382,8 @@ end_time = time.time()
 print(f"Execution time for mm_seq_fp32i8: {(end_time - start_time) * 1000:.3f} ms")
 
 # Measure time for fp16 no quant (problematic?? so slow
-w = torch.randn(N, M, dtype=torch.float16)
+# w = torch.randn(N, M, dtype=torch.float16)
+w = w_uint8.to(torch.float16)
 start_time = time.time()
 result = x_fp16 @ w
 end_time = time.time()
@@ -401,8 +391,6 @@ print(f">>> Execution time for fp16 noquant: {(end_time - start_time) * 1000:.3f
 print("\n")
 
 y_torch_f32 = y_torch.to(torch.float32)
-# Compute the relative differences
-relative_differences = torch.abs(y_torch_f32 - y_cpp) / torch.abs(y_torch_f32)
 # Compute the relative differences between y_cpp32 and y_torch_f32
 relative_differences_cpp32 = torch.abs(y_torch_f32 - y_cpp32) / torch.abs(y_torch_f32)
 
@@ -421,66 +409,31 @@ print(f"Maximum Relative Difference (y_cpp32 vs y_torch_f32): {max_relative_diff
 #     print(f"Value in y_cpp32: {y_cpp32.view(-1)[idx].item()}")
 
 # # Find the index of the item in y_torch_f32 that results in the maximum difference
-# max_diff_index_cpp32 = torch.argmax(relative_differences_cpp32).item()
-# print(f"Index of the item with the maximum difference (y_cpp32 vs y_torch_f32): {max_diff_index_cpp32}")
+max_diff_index_cpp32 = torch.argmax(relative_differences_cpp32).item()
+print(f"Index of the item with the maximum difference (y_cpp32 vs y_torch_f32): {max_diff_index_cpp32}")
 
 # # Print the values at max_diff_index
-# print(f"Value in y_torch_f32 at max_diff_index: {y_torch_f32.view(-1)[max_diff_index_cpp32]}")
-# print(f"Value in y_cpp32 at max_diff_index: {y_cpp32.view(-1)[max_diff_index_cpp32]}")
-
-# Find the maximum relative difference
-max_relative_difference = torch.max(relative_differences).item()
-print(f"Maximum Relative Difference y_cpp16 vs y_torch_f32: {max_relative_difference}")
-
-# Find the index of the item in y_torch_f32 that results in the maximum difference
-max_diff_index = torch.argmax(relative_differences).item()
-# print(f"Index of the item with the maximum difference: {max_diff_index}")
-
-# Print the values at max_diff_index
-print(f"Value in y_torch_f32 at max_diff_index: {y_torch_f32.view(-1)[max_diff_index]}")
-print(f"Value in y_cpp at max_diff_index: {y_cpp.view(-1)[max_diff_index]}")
-print(f"Value in y_cpp32 at max_diff_index: {y_cpp32.view(-1)[max_diff_index]}")
+print(f"Value in y_torch_f32 at max_diff_index: {y_torch_f32.view(-1)[max_diff_index_cpp32]}")
+print(f"Value in y_cpp32 at max_diff_index: {y_cpp32.view(-1)[max_diff_index_cpp32]}")
 
 # print(f"torch y: {y_torch[:10]}")
 # print(f"fp16i8 : {y_cpp[:10]}")
 
 # Compare the outputs
-print(torch.allclose(y_torch.to(torch.float32), y_cpp, rtol=1e-1))
+print(torch.allclose(y_torch.to(torch.float32), y_cpp32, rtol=1e-1))
 # breakpoint()
 
 '''
-rpi5, 4GB. cortexa76 has fp16 native support 
+rpi5, 8GB. cortexa76 has fp16 native support 
 ---------------------------------------------
+
+N = 768, M = 768
+Execution time for torch_mm8_one: 81.371 ms
+Execution time for mm_one_fp32i8: 11.121 ms
+>>> Execution time for fp16 noquant: 2.095 ms
+(looks ok, but so slow??
+
+B=4
 N = 1024
-M = int(N * 3.5), 
-Execution time for torch_mm8_one: 26.366 ms
-Execution time for mm_one_fp16i8    v1: 8.664 ms
-Execution time for mm_one_fp16i8    v2: 2.563 ms
-Execution time for mm_one_fp16i8    v3: 0.723 ms   (~30x improvement)
-Execution time for mm_one_fp32i8:   4.964 ms    (bad
-
-N = 768, M = 65536
-Execution time for torch_mm8_one: 379.489 ms
-Execution time for mm_one_fp16i8    v1: 1472.164 ms
-Execution time for mm_one_fp16i8    v2: 36.555 ms
-Execution time for mm_one_fp16i8    v3: 21.941 ms
-Execution time for mm_one_fp32i8: 1323.456 ms       ???
-
-"seq" (batch)
----------------
-
-B = 16
-N = 1024
-M = int(N * 3.5), 
-Execution time for torch_mm8_seq: 313.865 ms
-Execution time for mm_seq_fp16i8: 10.758 ms (only marginally faster than fp32. shader cores not fully utilized??
-Execution time for mm_seq_fp32i8: 13.444 ms  
-
-
-B = 128
-N = 1024
-M = int(N * 3.5), 
-Execution time for torch_mm8_seq: 2656.040 ms
-Execution time for mm_seq_fp16i8: 83.366 ms     (same trend as above. 
-Execution time for mm_seq_fp32i8: 107.051 ms
+M = int(N * 3.5)
 '''    
