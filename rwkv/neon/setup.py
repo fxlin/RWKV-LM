@@ -35,6 +35,7 @@ setup(
                 f'-mcpu={mcpu}',
                 f'-march={march}',
                 '-std=c++17',
+                flag,
                 '-fopenmp'    # Enable OpenMP
             ],
             extra_link_args=['-fopenmp'],  # Link against OpenMP library

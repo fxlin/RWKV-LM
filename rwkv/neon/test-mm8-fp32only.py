@@ -11,6 +11,7 @@ import time
 #   it's common to scale input & weights separately 
 # ex shape: w shape (768,64k) and mx shape (64k) ry shape (768)
 
+# reference impl
 def torch_mm8_one(x, w, mx, rx, my, ry):
     return x @ ((w.to(dtype=x.dtype) + 0.5) * ry * rx + my + mx)
 
@@ -67,8 +68,7 @@ yyy = mm8_neon.mm_one_fp32i8(
 )
 # seq
 yseq = torch_mm8_seq(xseq_fp16, w_uint8, mx_fp16, rx_fp16, my_fp16, ry_fp16)
-# yseq1 = mm8_neon.mm_seq_fp16i8(xseq_fp16, w_uint8, mx_fp16, rx_fp16, my_fp16, ry_fp16)
-
+# breakpoint()
 ############################################################
 # correctness test mm8_one
 N = 10
@@ -96,7 +96,10 @@ tensor([ 5.6016,  5.8906,  6.1797,  6.4688,  6.7617,  7.0508,  7.3438,  7.6367,
          7.9258,  8.2109,  8.5000,  8.7969,  9.0859,  9.3750,  9.6641,  9.9609,
         10.2500, 10.5391, 10.8281, 11.1172], dtype=torch.float16)
 '''
+# dequant w to fp16, then compute all on fp16
 y = torch_mm8_one(x_fp16, w_uint8, mx_fp16, rx_fp16, my_fp16, ry_fp16)
+
+# dequant w to fp32, then compute all on fp32
 y1 = torch_mm8_one(
     x_fp16.to(torch.float), 
     w_uint8, 
@@ -106,7 +109,9 @@ y1 = torch_mm8_one(
     ry_fp16.to(torch.float)
 )
 
-# yy = mm8_neon.mm_one_fp16i8(x_fp16, w_uint8, mx_fp16, rx_fp16, my_fp16, ry_fp16, 1)
+# yy = mm8_neon.mm_one_fp16i8(x_fp16, w_uint8, mx_fp16, rx_fp16, my_fp16, ry_fp16, 1)  # not impl
+
+# neon: dequant w to fp32, then compute all on fp32. with neon
 yyy = mm8_neon.mm_one_fp32i8(
     x_fp16.to(torch.float), 
     w_uint8, 
@@ -115,6 +120,9 @@ yyy = mm8_neon.mm_one_fp32i8(
     my_fp16.to(torch.float), 
     ry_fp16.to(torch.float)
 )
+
+# breakpoint()
+
 ############################################################
 # correctness test mm8_one
 N = 50
@@ -138,6 +146,9 @@ ry_fp16 = torch.linspace(0.1, 1.5, N, dtype=torch.float16).unsqueeze(1)
 expected:
 tensor([...], dtype=torch.float16)
 '''
+
+# cf above
+
 y = torch_mm8_one(x_fp16, w_uint8, mx_fp16, rx_fp16, my_fp16, ry_fp16)
 y1 = torch_mm8_one(
     x_fp16.to(torch.float), 
@@ -230,11 +241,20 @@ print(">here")
 ############################################################
 # time benchmark ... mm8_one
 # x (N) w (N,M) (768,768*3.5)  mx (M) rx (M) my (N,1) ry (N,1)
+
 # Example data
 # N = 1024
 # M = int(N * 3.5)
-N = 768
-M = 768
+
+# N = 768
+# M = int(N * 3.5)
+
+# cls head 
+N = 1024
+M = 65536
+
+# N = 768
+# M = 768
 
 x_fp16 = torch.randn(N, dtype=torch.float16)
 w_uint8 = torch.randint(0, 256, (N, M), dtype=torch.uint8)
@@ -284,23 +304,6 @@ start_time = time.time()
 y = torch_mm8_one(x_fp16, w_uint8, mx_fp16, rx_fp16, my_fp16, ry_fp16)
 end_time = time.time()
 print(f"Execution time for torch_mm8_one: {(end_time - start_time) * 1000:.3f} ms")
-
-# fp16, different tries 
-start_time = time.time()
-# yy1 = mm8_neon.mm_one_fp16i8(x_fp16, w_uint8, mx_fp16, rx_fp16, my_fp16, ry_fp16, 1)
-end_time = time.time()
-print(f"Execution time for mm_one_fp16i8    v1: {(end_time - start_time) * 1000:.3f} ms")
-
-start_time = time.time()
-# yy2 = mm8_neon.mm_one_fp16i8(x_fp16, w_uint8, mx_fp16, rx_fp16, my_fp16, ry_fp16, 2)
-end_time = time.time()
-print(f"Execution time for mm_one_fp16i8    v2: {(end_time - start_time) * 1000:.3f} ms")
-
-start_time = time.time()
-# yy3 = mm8_neon.mm_one_fp16i8(x_fp16, w_uint8, mx_fp16, rx_fp16, my_fp16, ry_fp16, 3)
-end_time = time.time()
-print(f"Execution time for mm_one_fp16i8    v3: {(end_time - start_time) * 1000:.3f} ms")
-# print(f"shape w: {w_uint8.shape} x_fp16: {x_fp16.shape} mx_fp16: {mx_fp16.shape} rx_fp16: {rx_fp16.shape} my_fp16: {my_fp16.shape} ry_fp16: {ry_fp16.shape}")
 
 # fp32
 start_time = time.time()
@@ -427,11 +430,32 @@ print(torch.allclose(y_torch.to(torch.float32), y_cpp32, rtol=1e-1))
 rpi5, 8GB. cortexa76 has fp16 native support 
 ---------------------------------------------
 
-N = 768, M = 768
-Execution time for torch_mm8_one: 81.371 ms
-Execution time for mm_one_fp32i8: 11.121 ms
->>> Execution time for fp16 noquant: 2.095 ms
-(looks ok, but so slow??
+mm_one_fp32i8 V1
+
+    N = 1024, M = 3584
+    Execution time for torch_mm8_one: 27.992 ms
+    Execution time for mm_one_fp32i8: 3.611 ms
+    >>> Execution time for fp16 noquant: 1.786 ms    
+    ^^^^ ONLY CLEAR FOR LARGER INPUT ??
+
+    N = 768, M = 2688
+    Execution time for torch_mm8_one: 16.009 ms
+    Execution time for mm_one_fp32i8: 1.412 ms
+    >>> Execution time for fp16 noquant: 1.449 ms
+    ^^^^ GAP IS SMALL 
+    
+    N = 1024, M = 65536
+    Execution time for torch_mm8_one: 554.937 ms
+    Execution time for mm_one_fp32i8: 2501.514 ms
+    >>> Execution time for fp16 noquant: 25.588 ms
+    ^^^^ why so slow??
+
+    after some changes (loop unrolling etc..., better, bush still slow)
+    N = 1024, M = 65536
+    Execution time for torch_mm8_one: 682.709 ms
+    Execution time for mm_one_fp32i8: 2045.467 ms
+    >>> Execution time for fp16 noquant: 25.564 ms
+
 
 B=4
 N = 1024
