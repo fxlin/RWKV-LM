@@ -12,10 +12,10 @@ def print_memory_usage(stage):
     process = psutil.Process(os.getpid())
     mem_info = process.memory_info()
     system_mem = psutil.virtual_memory()
-    print(f"{stage} - Process memory: {mem_info.rss / (1024 * 1024):.2f} MB, System memory: {system_mem.used / (1024 * 1024):.2f} MB / {system_mem.total / (1024 * 1024):.2f} MB")
+    print(f">>>>>>>>>>>>>>>> {stage} - Process memory: {mem_info.rss / (1024 * 1024):.2f} MB, System memory: {system_mem.used / (1024 * 1024):.2f} MB / {system_mem.total / (1024 * 1024):.2f} MB")
     # breakpoint()
-
 print_memory_usage("before load modules")      # 36MB
+
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -25,8 +25,6 @@ from typing import Optional
 import numpy as np
 from .emb_lookup import EmbeddingLookupTable
 # import matplotlib.pyplot as plt
-
-print_memory_usage("after load numpy")      # 194MB
 
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.allow_tf32 = True
@@ -205,7 +203,7 @@ elif config_has_neon:  # neon, but no fp16 native support, fallback to fp32
             #assume all other tensors (but w) are fp32. no conversion 
             return mm8_neon.mm_seq_fp32i8(x, w, mx, rx, my, ry)
         else:
-            # all tensors are fp16.
+            # all tensors are fp16. convert to fp32 before calling neon
             # conversion here can be costly?
             return mm8_neon.mm_seq_fp32i8(
                 x.to(torch.float),
@@ -219,8 +217,10 @@ elif config_has_neon:  # neon, but no fp16 native support, fallback to fp32
     @torch.jit.ignore
     def mm8_one(x, w, mx, rx, my, ry):        
         if x.dtype==torch.float32:
+            #assume all other tensors (but w) are fp32. no conversion 
             return mm8_neon.mm_one_fp32i8(x, w, mx, rx, my, ry)
         else: 
+            # all tensors are fp16. convert to fp32 before calling neon
             return mm8_neon.mm_one_fp32i8(
                 x.to(torch.float),
                 w,
@@ -374,7 +374,9 @@ class RWKV(MyModule):
             print_memory_usage("After gc")
 
             w = self.w
-            
+
+            print_memory_usage("after loading self.w from disk")
+
             ALREADY_CONVERTED = False
             if '_strategy' in w:  # xzl: special key to indicate model has been converted...
                 ALREADY_CONVERTED = True
@@ -526,6 +528,7 @@ class RWKV(MyModule):
             prxxx()
 
             ####################### convert weights in self.w in place
+            print_memory_usage("before model conversion")            
             # xzl: below - convert weights per layer strategy...
             if not ALREADY_CONVERTED:
                 try: # precompute embedding         xzl: fuse layers?? (emb + ln0?
@@ -535,7 +538,7 @@ class RWKV(MyModule):
                 del w['blocks.0.ln0.weight']
                 del w['blocks.0.ln0.bias']
 
-            if self.lazy_emb:
+            if self.lazy_emb:   # xzl: this adds +100MB....
                 self.emb = EmbeddingLookupTable(w['emb.weight'], args.n_embd, w['emb.weight'].shape[0])
 
             print_need_newline = False
@@ -554,7 +557,10 @@ class RWKV(MyModule):
             total_parameter_size = 0
             for x in keys:      # xzl: iterate over all weights...  
                 parameter_size = 0
-                w[x].requires_grad = False
+                try: 
+                    w[x].requires_grad = False
+                except AttributeError:
+                    breakpoint()
                 layer_id = int(x.split('.')[1]) if ('blocks.' in x) else 0
                 if ('ln_out.' in x) or ('head.' in x):
                     layer_id = args.n_layer     # xzl: revrse engineer ... to extract the layer_id
@@ -563,11 +569,13 @@ class RWKV(MyModule):
                 ATYPE = dd.atype
                 WTYPE = dd.wtype
 
-                # xzl: quantize ffn.key... 
+                # xzl: quantize ffn.key... (needed??? ... from WC 
+                '''
                 if 'ffn.key.weight' in x:
                     w[x+'4b']   = quantize(w[x].t().to(DEVICE), 4)   # a tuple
                     w[x+'2b']   = quantize(w[x].t().to(DEVICE), 2)   # a tuple
                     w[x+'1b']   = quantize(w[x].t().to(DEVICE), 1)   # a tuple
+                '''
 
                 # xzl: below, continue to conversion....??
                 if not ALREADY_CONVERTED:
@@ -690,6 +698,7 @@ class RWKV(MyModule):
                         torch.cuda.empty_cache()
 
                 # xzl: dump this weight w[x] info...
+                #   cal size of this layer. 
                 shape = [i for i in w[x].shape if i != 1]
                 nelement = 0
 
@@ -722,8 +731,10 @@ class RWKV(MyModule):
                         prxxx('\n', end = '')
                         print_need_newline = False
 
+                    # prxxx(x.ljust(32), dt.rjust(4), str(w[x].device).rjust(8), shape,
+                    #         parameter_size / MiB, ' (pinned)' if w[x].is_pinned() else '')
                     prxxx(x.ljust(32), dt.rjust(4), str(w[x].device).rjust(8), shape,
-                            parameter_size / MiB, ' (pinned)' if w[x].is_pinned() else '')
+                            f"{parameter_size / MiB:.1f} MB", ' (pinned)' if w[x].is_pinned() else '')
                 else:
                     print_need_newline = True
                     prxxx('.', end = '', flush = True)
@@ -838,6 +849,8 @@ class RWKV(MyModule):
                 gc.collect()
 
             prxxx("parameter size: ", f"{total_parameter_size / MiB:.3f} MB")
+            print_memory_usage("after model conversion")
+
             
             if convert_and_save_and_exit:
                 w['_strategy'] = args.strategy_string
@@ -3547,7 +3560,7 @@ class RWKV(MyModule):
                 else:
                     # tt0=time.time()
                     x = mm8_one(x, w['head.weight'], w['head.weight_mx'], w['head.weight_rx'], w['head.weight_my'], w['head.weight_ry'])
-                    # print(f"mm8_one time: {time.time()-tt0:.2f} sec")
+                    # print(f"cls head int8: mm8_one time: {time.time()-tt0:.2f} sec")
 
             time_measure['cls_end'] = time.time()
             time_measure['cls_exec'] = time_measure['cls_end'] - time_measure['cls_start']

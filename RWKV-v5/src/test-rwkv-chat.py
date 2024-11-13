@@ -58,11 +58,11 @@ import os
 # model_path='/data/models/pi-deployment/01b-pre-x58-512'
 
 #model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
-# model_path='/data/models/pi-deployment/01b-pre-x59-976'
+model_path='/data/models/pi-deployment/01b-pre-x59-976'
 # model_path='/data/models/pi-deployment/04b-tunefull-x58-562'   # works on opi0
 # model_path='/data/models/pi-deployment/04b-pre-x59-2405'
 
-model_path='/data/models/pi-deployment/1b5-pre-x59-929'
+# model_path='/data/models/pi-deployment/1b5-pre-x59-929'
 # model_path='/data/models/pi-deployment/1b5-pre-x59-929_fp16i8'
 # model_path='/data/models/pi-deployment/01b-pre-x59-CLS-TEST'
 
@@ -161,6 +161,7 @@ args = PIPELINE_ARGS(temperature = 1.0, top_p = 0.7, top_k = 100, # top_k = 0 th
                      chunk_len = 256) # split input into chunks to save VRAM (shorter -> slower)
 
 print_memory_usage("before generate")
+breakpoint()
 
 TOKEN_CNT = 100 
 pipeline.generate(ctx, token_count=TOKEN_CNT, args=args, callback=my_print)
@@ -189,6 +190,9 @@ print('\n')
 '''
 speed test 
 (careful: vscode-server will take quite some cpu time)
+
+full results
+https://myuva.sharepoint.com/:x:/r/sites/XSEL-RWKV/Shared%20Documents/RWKV/results_rwkv.xlsx?d=wbf0bd61c5429469a8c039df4d8d4f46a&csf=1&web=1&e=0dyjUv
 
 rpi5 (supports fp16 in neon)
                                 tok/sec                     mem(inference)
