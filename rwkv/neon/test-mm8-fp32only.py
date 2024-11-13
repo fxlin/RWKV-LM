@@ -246,12 +246,12 @@ print(">here")
 # N = 1024
 # M = int(N * 3.5)
 
-# N = 768
-# M = int(N * 3.5)
+N = 768
+M = int(N * 3.5)
 
 # cls head 
-N = 1024
-M = 65536
+# N = 1024
+# M = 65536
 
 # N = 768
 # M = 768
@@ -430,26 +430,43 @@ print(torch.allclose(y_torch.to(torch.float32), y_cpp32, rtol=1e-1))
 rpi5, 8GB. cortexa76 has fp16 native support 
 ---------------------------------------------
 
-mm_one_fp32i8 V1
 
-    N = 1024, M = 3584
-    Execution time for torch_mm8_one: 27.992 ms
-    Execution time for mm_one_fp32i8: 3.611 ms
-    >>> Execution time for fp16 noquant: 1.786 ms    
-    ^^^^ ONLY CLEAR FOR LARGER INPUT ??
 
-    N = 768, M = 2688
-    Execution time for torch_mm8_one: 16.009 ms
-    Execution time for mm_one_fp32i8: 1.412 ms
-    >>> Execution time for fp16 noquant: 1.449 ms
-    ^^^^ GAP IS SMALL 
-    
-    N = 1024, M = 65536
-    Execution time for torch_mm8_one: 554.937 ms
-    Execution time for mm_one_fp32i8: 2501.514 ms
-    >>> Execution time for fp16 noquant: 25.588 ms
-    ^^^^ why so slow??
+N = 1024, M = 3584
+    mm_one_fp32i8 V1
+        Execution time for torch_mm8_one: 27.992 ms
+        Execution time for mm_one_fp32i8: 3.611 ms
+        >>> Execution time for fp16 noquant: 1.786 ms    
+        ^^^^ ONLY CLEAR FOR LARGER INPUT ??
+    mm_one_fp32i8 V3
+        Execution time for torch_mm8_one: 28.183 ms
+        Execution time for mm_one_fp32i8: 1.819 ms  <<<< fixed, great
+        >>> Execution time for fp16 noquant: 1.770 ms
 
+N = 768, M = 2688
+    mm_one_fp32i8 V1
+        Execution time for torch_mm8_one: 16.009 ms
+        Execution time for mm_one_fp32i8: 1.412 ms
+        >>> Execution time for fp16 noquant: 1.449 ms
+        ^^^^ GAP IS SMALL 
+    mm_one_fp32i8 V3
+        Execution time for torch_mm8_one: 15.174 ms
+        Execution time for mm_one_fp32i8: 1.198 ms  <<<< fixed, great
+        >>> Execution time for fp16 noquant: 0.913 ms
+
+N = 1024, M = 65536
+
+    mm_one_fp32i8 V1
+        Execution time for torch_mm8_one: 554.937 ms
+        Execution time for mm_one_fp32i8: 2501.514 ms
+        >>> Execution time for fp16 noquant: 25.588 ms
+        ^^^^ why so slow???
+
+    mm_one_fp32i8 V3
+        Execution time for torch_mm8_one: 561.809 ms
+        Execution time for mm_one_fp32i8: 29.913 ms <<<<<<< fixed, great
+        >>> Execution time for fp16 noquant: 26.757 ms        
+            
     after some changes (loop unrolling etc..., better, bush still slow)
     N = 1024, M = 65536
     Execution time for torch_mm8_one: 682.709 ms
