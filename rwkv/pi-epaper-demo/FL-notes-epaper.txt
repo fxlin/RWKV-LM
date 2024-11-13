@@ -17,6 +17,8 @@ https://www.waveshare.com/wiki/2.13inch_Touch_e-Paper_HAT_Manual#python
 # touch lib (TP_lib, in fact only needs this l-- both display and touch ) 
 cd ~/workspace-waveshare/example/python
 python setup.py develop
+# if for root, has to be 
+sudo python setup.py develop
 
 "TP lib" is a nweer version
 
@@ -46,7 +48,7 @@ sudo python3 epd_2in13_V4_test.py
 # orange pi
 # conclusion -- use root. otherwise super tedious
 #   b/c wiringOP needs /dev/mem, which requires root. 
-(change permission on /dev/mem wont work 
+(change permission on /dev/mem wont work; it seems kernel enforces the restriction)
 
 sudo su
 source env-pi.sh 

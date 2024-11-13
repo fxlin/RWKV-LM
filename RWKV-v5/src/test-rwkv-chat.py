@@ -26,7 +26,7 @@ if os.environ.get('RWKV_CUDA_ON') != '0':
     os.environ["RWKV_CUDA_ON"] = '1' #default
 
 from rwkv.model import RWKV
-from rwkv.utils import PIPELINE, PIPELINE_ARGS
+from rwkv.utils import PIPELINE, PIPELINE_ARGS, print_memory_usage
 from rwkv.arm_plat import is_amd_cpu
 
 import os
@@ -54,18 +54,21 @@ import os
 # model_path='/data/models/0.1b-pre-x59-16x-1451'
 # model_path='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-pretrain-x59/from-hpc/rwkv-976'
 
-# model_path='/data/models/pi-deployment/01b-pre-x52-1455'
+# model_path='/data/models/pi-deployment/01b-pre-x52-1455'        # works on opi0
 # model_path='/data/models/pi-deployment/01b-pre-x58-512'
 
-# model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
+#model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
 # model_path='/data/models/pi-deployment/01b-pre-x59-976'
-# model_path='/data/models/pi-deployment/04b-tunefull-x58-562'
+# model_path='/data/models/pi-deployment/04b-tunefull-x58-562'   # works on opi0
 # model_path='/data/models/pi-deployment/04b-pre-x59-2405'
 
-# model_path='/data/models/rwkv-04b-pre-x59-860'
-
 model_path='/data/models/pi-deployment/1b5-pre-x59-929'
+# model_path='/data/models/pi-deployment/1b5-pre-x59-929_fp16i8'
 # model_path='/data/models/pi-deployment/01b-pre-x59-CLS-TEST'
+
+# has mlp, cls (need to pass in hyperparam)
+# model_path='/data/models/orin-deployment/01b-x59'
+# model_path='/data/models/orin-deployment/04b-x59'
 
 # #Only head.l1 tuned. KL loss (good
 # model_path='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/run3-KL-loss/rwkv-43'
@@ -102,8 +105,8 @@ else:
     if is_amd_cpu():
         strategy='cpu fp32'  # amd cpu lacks hard fp16...
     else:
-        strategy='cpu fp16'
-    # strategy='cpu fp16i8'
+         strategy='cpu fp16'
+        #strategy='cpu fp16i8'       # quant
 
 # use below to quantize model & save
 if False: 
@@ -114,13 +117,15 @@ if False:
     model = RWKV(model=model_path, strategy=strategy, verbose=True, convert_and_save_and_exit=save_path)
     sys.exit(0)
 
+print_memory_usage("before model build")
+
 t0 = time.time()
 model = RWKV(model=model_path, 
              strategy=strategy, 
              verbose=True)
 #              head_K=200, load_token_cls='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/from-hpc/rwkv-823-cls.npy')
 
-
+print_memory_usage("before pipeline build")
 
 pipeline = PIPELINE(model, "rwkv_vocab_v20230424")
 
@@ -133,8 +138,14 @@ ctx = "\nUniversity of Virginia is"
 # ctx = "\nOnce upon a time there was a little girl named Lucy"
 print(ctx, end='')
 
+cnt=0
+
 def my_print(s):
+    global cnt
+    cnt += 1
     print(s, end='', flush=True)
+    if cnt % 50 == 0:
+        print_memory_usage("\n")
 
 t1 = time.time()
 
@@ -149,8 +160,9 @@ args = PIPELINE_ARGS(temperature = 1.0, top_p = 0.7, top_k = 100, # top_k = 0 th
                      token_stop = [], # stop generation whenever you see any token here
                      chunk_len = 256) # split input into chunks to save VRAM (shorter -> slower)
 
+print_memory_usage("before generate")
 
-TOKEN_CNT = 200 
+TOKEN_CNT = 100 
 pipeline.generate(ctx, token_count=TOKEN_CNT, args=args, callback=my_print)
 print('\n')
 
@@ -178,32 +190,36 @@ print('\n')
 speed test 
 (careful: vscode-server will take quite some cpu time)
 
-rpi5 (4GB DRAM, supports fp16 in neon)
-                                tok/sec
+rpi5 (supports fp16 in neon)
+                                tok/sec                     mem(inference)
 x52     01b-pre-x52-1455        15.3                
-    fp16i8 v3                       ~12 tok/sec  
+    quant fp16i8 v3                       ~12 tok/sec  
             (reason: openmp multithreading straggler?. occassionally, mm8 takes 3x-4x longer to finish)
-    fp16i8 v4                       ~10 tok/sec  
+    quant fp16i8 v4                       ~10 tok/sec  
             (even for M=N=768, 2t is still benefitical; better than 1t)
                                  
-x59     01b-pre-x59-976         15.02 (old: 10.5
-        fp16i8 v3                  (old: 8.13                        
+x59     01b-pre-x59-976         15.02 tok/s   mem=1GB 
+        fp16i8 v3               11 tok/s      mem=.9GB
 
+                               tok/s  mem(inference)
 04b official (x52)             6.62    
-    04b-pre-x59-2405           6.86         (old -- 3.36 (not too bad
-    fp16i8 v3                           (old -- 3.0 (not too bad)
 
-1b5  1b5-pre-x59-929   (on rpi5 8GB RAM) 3 tok/s
+04b-pre-x59-2405           6.86 tok/s   mem=3.5G             
+    quant fp16i8 v3            3.45 tok/s   mem=1.3G
+    quant fp32i8 v3            3.00 tok/s   mem=1.3G
 
+1b5  1b5-pre-x59-929   (on rpi5 8GB RAM) 3 tok/s        mem=4G (??
+     quant fp16i8 v3            1.95 toks/sec    mem=3.5G
+     quant fp32i8 v3            1.1 toks/sec                mem=3.5G
 
 --------------
 rpi4  (BCM2711, quad Cortex-A72, 1.5GHz, 8GB)
 (only support fp32 in neon)
                                 tok/sec
 x52     01b-pre-x52-1455        5.1      
-    fp16i8                       .4 (very slow)
+    quant fp16i8                       .4 (very slow)
 x59     01b-pre-x59-976         3.1                                
-    fp16i8                      .45 (very slow)
+    quant fp16i8                      .45 (very slow)
 
     1b5                          .26 (slow)
 
@@ -211,9 +227,10 @@ x59     01b-pre-x59-976         3.1
 orange pi zero2w (Allwinner H618; quad CortexA53, 1.5GHz; 4GB DRAM)
                         tok/sec
 01b-pre-x52-1455        4.96
+01b-pre-x52-1455 fp16i8 (<1) # very slow, and mem saving is not significant?
 01b-pre-x59-976         4.72
 04b-tunefull-x58-562    2.42    
-04b-pre-x59-860         2.30         
+04b-pre-x59-860         2.30
 
 (naked cpu temp reached ~70C)
 board level power: 0.43A@5.25v

@@ -69,8 +69,11 @@ else:
 from .arm_plat import is_raspberry_pi, is_odroid
 # import arm_plat
 
-config_has_neon = False
-config_neon_fp16 = False
+# these will affect how mm8 is implemented on ARM cores
+# if native fp16 simd, dequant & compute w/ fp16 simd
+# if no fp16, dequant to fp32 and compute w/ fp32 simd
+config_neon_fp16 = False    # neon with native fp16 support. dequant & compute w/ fp16 simd
+config_has_neon = False     # neon, with or w/o fp16 support. 
 
 if os.environ.get('RWKV_NEON_ON') == '1':
     config_has_neon = True  
@@ -78,9 +81,11 @@ if os.environ.get('RWKV_NEON_ON') == '1':
     # from .neon.mm8_neon import *
     # import .neon.mm8_neon as mm8_neon
   
+    # guess: which boards support native fp16
     rpiver = is_raspberry_pi()
     if rpiver and '5' in rpiver:
         config_neon_fp16 = True
+
     # TBD: orange pi, Apple silicon 
 
 '''
@@ -196,9 +201,12 @@ elif config_has_neon:  # neon, but no fp16 native support, fallback to fp32
     # @MyStatic
     @torch.jit.ignore
     def mm8_seq(x, w, mx, rx, my, ry):
-        if x.dtype==torch.float32: #assume all other tensors (but w) are fp32. no conversion 
+        if x.dtype==torch.float32: 
+            #assume all other tensors (but w) are fp32. no conversion 
             return mm8_neon.mm_seq_fp32i8(x, w, mx, rx, my, ry)
         else:
+            # all tensors are fp16.
+            # conversion here can be costly?
             return mm8_neon.mm_seq_fp32i8(
                 x.to(torch.float),
                 w,
@@ -736,6 +744,7 @@ class RWKV(MyModule):
                 # testing code #
                 if is_raspberry_pi() or is_odroid():
                     # md5sum: 1ba8dc5e...
+                    # md5sum: 1ba8dc5e...
                     args.load_token_cls='/data/models/pi-deployment/rwkv-823-cls.npy'
                 else: 
                     # args.load_token_cls='/data/home/bfr4xr/RWKV-LM/RWKV-v5/out/01b-pre-x59-8x-cls/from-hpc/rwkv-823-cls.npy'
@@ -821,14 +830,12 @@ class RWKV(MyModule):
                 self.head_l1_weight = w['head_l1.weight']
                 self.vocab = w['head.weight'].shape[1]   # shape D,vocab
 
-                print_memory_usage("4444 Before deleting head.weight")
-                # save space
+                # we no longer need the original head weight, delete it to save memory
                 x='head.weight'
                 print(f"will delete: {x}, shape: {w[x].shape}, size: {w[x].nelement() * w[x].element_size() / 1024:.2f} KB")
-                del orghead
+                del orghead     # must do this to del reference
                 del w['head.weight']
                 gc.collect()
-                print_memory_usage("4444  After deleting head.weight")
 
             prxxx("parameter size: ", f"{total_parameter_size / MiB:.3f} MB")
             

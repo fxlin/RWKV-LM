@@ -16,6 +16,7 @@
 
 // #define DEBUG_KERNEL 1 //uncomment to enable debug prints
 
+#ifdef HAS_NEON_FP16
 // cf: rwkv/cuda/operators.cu kernel_mm_one_fp16i8
 // omp, not caring much about memory locality
 // works
@@ -410,7 +411,7 @@ void kernel_mm_one_fp16i8_v3_1c(
         }
     }
 }
-
+#endif      // HAS_NEON_FP16
 
 #if 0
 // bad. not broadcasting 
@@ -527,9 +528,12 @@ void kernel_mm_one_fp32i8_nosimd(
     }
 }
 
-// simd version. checked, good 
-// opt level similar to kernel_mm_one_fp16i8_v1
-void kernel_mm_one_fp32i8(
+// simd version. checked, good, opt level similar to kernel_mm_one_fp16i8_v1
+// verified -- correct 
+// dequantized matmul, weights in int8, all other in fp32. 
+// dequantize weights on the fly, do the computation on fp32, and write back to fp32
+void kernel_mm_one_fp32i8_v1(
+// void kernel_mm_one_fp32i8(
     int N, int M,
     const float* x_fp32,
     const uint8_t* w, int w_stride,
@@ -600,6 +604,227 @@ void kernel_mm_one_fp32i8(
     }
 }
 
+// unrolling, but still parallelize over M
+void kernel_mm_one_fp32i8_v2(
+    int N, int M,
+    const float* x_fp32,
+    const uint8_t* w, int w_stride,
+    const float* mx_fp32,
+    const float* rx_fp32,
+    const float* my_fp32,
+    const float* ry_fp32,
+    float* y_fp)
+{
+    // Parallelize over the M dimension using OpenMP
+    #pragma omp parallel for schedule(static)
+    for (int k = 0; k < M; ++k) {
+        float rx_k = rx_fp32[k];
+        float mx_k = mx_fp32[k];
+        float y_local = 0.0f;
+
+        // NEON vector constants
+        float32x4_t rx_k_vec = vdupq_n_f32(rx_k);
+        float32x4_t mx_k_vec = vdupq_n_f32(mx_k);
+
+        // Initialize NEON accumulator
+        float32x4_t y_acc_vec = vdupq_n_f32(0.0f);
+
+        int j = 0;
+        for (; j <= N - 16; j += 16) {
+            // Load x[j:j+15], ry[j:j+15], my[j:j+15]
+            float32x4_t x_vec_0 = vld1q_f32(&x_fp32[j]);
+            float32x4_t x_vec_1 = vld1q_f32(&x_fp32[j + 4]);
+            float32x4_t x_vec_2 = vld1q_f32(&x_fp32[j + 8]);
+            float32x4_t x_vec_3 = vld1q_f32(&x_fp32[j + 12]);
+
+            float32x4_t ry_vec_0 = vld1q_f32(&ry_fp32[j]);
+            float32x4_t ry_vec_1 = vld1q_f32(&ry_fp32[j + 4]);
+            float32x4_t ry_vec_2 = vld1q_f32(&ry_fp32[j + 8]);
+            float32x4_t ry_vec_3 = vld1q_f32(&ry_fp32[j + 12]);
+
+            float32x4_t my_vec_0 = vld1q_f32(&my_fp32[j]);
+            float32x4_t my_vec_1 = vld1q_f32(&my_fp32[j + 4]);
+            float32x4_t my_vec_2 = vld1q_f32(&my_fp32[j + 8]);
+            float32x4_t my_vec_3 = vld1q_f32(&my_fp32[j + 12]);
+
+            // Load w[j:j+15, k] individually and pack into vectors
+            float w_vals_0[4] = {
+                static_cast<float>(w[(j + 0) * w_stride + k]) + 0.5f,
+                static_cast<float>(w[(j + 1) * w_stride + k]) + 0.5f,
+                static_cast<float>(w[(j + 2) * w_stride + k]) + 0.5f,
+                static_cast<float>(w[(j + 3) * w_stride + k]) + 0.5f
+            };
+            float w_vals_1[4] = {
+                static_cast<float>(w[(j + 4) * w_stride + k]) + 0.5f,
+                static_cast<float>(w[(j + 5) * w_stride + k]) + 0.5f,
+                static_cast<float>(w[(j + 6) * w_stride + k]) + 0.5f,
+                static_cast<float>(w[(j + 7) * w_stride + k]) + 0.5f
+            };
+            float w_vals_2[4] = {
+                static_cast<float>(w[(j + 8) * w_stride + k]) + 0.5f,
+                static_cast<float>(w[(j + 9) * w_stride + k]) + 0.5f,
+                static_cast<float>(w[(j + 10) * w_stride + k]) + 0.5f,
+                static_cast<float>(w[(j + 11) * w_stride + k]) + 0.5f
+            };
+            float w_vals_3[4] = {
+                static_cast<float>(w[(j + 12) * w_stride + k]) + 0.5f,
+                static_cast<float>(w[(j + 13) * w_stride + k]) + 0.5f,
+                static_cast<float>(w[(j + 14) * w_stride + k]) + 0.5f,
+                static_cast<float>(w[(j + 15) * w_stride + k]) + 0.5f
+            };
+
+            float32x4_t w_vec_0 = vld1q_f32(w_vals_0);
+            float32x4_t w_vec_1 = vld1q_f32(w_vals_1);
+            float32x4_t w_vec_2 = vld1q_f32(w_vals_2);
+            float32x4_t w_vec_3 = vld1q_f32(w_vals_3);
+
+            // Compute temp = (w_vec * ry_vec * rx_k_vec) + my_vec + mx_k_vec
+            float32x4_t temp_0 = vmulq_f32(w_vec_0, ry_vec_0);
+            temp_0 = vmulq_f32(temp_0, rx_k_vec);
+            temp_0 = vaddq_f32(temp_0, my_vec_0);
+            temp_0 = vaddq_f32(temp_0, mx_k_vec);
+
+            float32x4_t temp_1 = vmulq_f32(w_vec_1, ry_vec_1);
+            temp_1 = vmulq_f32(temp_1, rx_k_vec);
+            temp_1 = vaddq_f32(temp_1, my_vec_1);
+            temp_1 = vaddq_f32(temp_1, mx_k_vec);
+
+            float32x4_t temp_2 = vmulq_f32(w_vec_2, ry_vec_2);
+            temp_2 = vmulq_f32(temp_2, rx_k_vec);
+            temp_2 = vaddq_f32(temp_2, my_vec_2);
+            temp_2 = vaddq_f32(temp_2, mx_k_vec);
+
+            float32x4_t temp_3 = vmulq_f32(w_vec_3, ry_vec_3);
+            temp_3 = vmulq_f32(temp_3, rx_k_vec);
+            temp_3 = vaddq_f32(temp_3, my_vec_3);
+            temp_3 = vaddq_f32(temp_3, mx_k_vec);
+
+            // Accumulate y_acc_vec += x_vec * temp
+            y_acc_vec = vmlaq_f32(y_acc_vec, x_vec_0, temp_0);
+            y_acc_vec = vmlaq_f32(y_acc_vec, x_vec_1, temp_1);
+            y_acc_vec = vmlaq_f32(y_acc_vec, x_vec_2, temp_2);
+            y_acc_vec = vmlaq_f32(y_acc_vec, x_vec_3, temp_3);
+        }
+
+        // Horizontal addition to sum y_acc_vec
+        y_local += vaddvq_f32(y_acc_vec);
+
+        // Handle remaining elements
+        for (; j < N; ++j) {
+            float x_j = x_fp32[j];
+            float ry_j = ry_fp32[j];
+            float my_j = my_fp32[j];
+
+            float w_val = static_cast<float>(w[j * w_stride + k]) + 0.5f;
+
+            float temp = (w_val * ry_j * rx_k) + my_j + mx_k;
+
+            y_local += x_j * temp;
+        }
+
+        // Store the result
+        y_fp[k] = y_local;
+    }
+}
+
+// dequantized matmul, weights in int8, all other in fp32. 
+// dequantize weights on the fly, do the computation on fp32, and write back to fp32
+// x_fp32: shape: N; w: shape: N, M; 
+// mx_fp32: shape: M; rx_fp32: shape: M; 
+// my_fp32: shape: N; ry_fp32: shape: N; 
+// y_fp: shape: M
+// dequantized matmul, weights in int8, all other in fp32. 
+// dequantize weights on the fly, do the computation on fp32, and write back to fp32
+// x_fp32: shape: N; w: shape: N, M; 
+// mx_fp32: shape: M; rx_fp32: shape: M; 
+// my_fp32: shape: N; ry_fp32: shape: N; 
+// y_fp: shape: M
+void kernel_mm_one_fp32i8_v3(
+    int N, int M,
+    const float* x_fp32,
+    const uint8_t* w, int w_stride,
+    const float* mx_fp32,
+    const float* rx_fp32,
+    const float* my_fp32,
+    const float* ry_fp32,
+    float* y_fp)
+{
+    // Initialize y_fp to zero
+    std::fill(y_fp, y_fp + M, float(0.0));
+
+    int num_threads = omp_get_max_threads();
+    // Allocate thread-local accumulators
+    std::vector<std::vector<float>> y_private(num_threads, std::vector<float>(M, 0.0f));
+
+    // Parallelize over N dimension
+    #pragma omp parallel num_threads(num_threads)
+    {
+        int thread_id = omp_get_thread_num();
+        float* y_thread = y_private[thread_id].data();
+
+        // Loop over N dimension
+        #pragma omp for schedule(static)
+        for (int j = 0; j < N; ++j) {
+            float ry_j = ry_fp32[j];
+            float my_j = my_fp32[j];
+            float x_j = x_fp32[j];
+
+            // NEON vector constants
+            float32x4_t ry_j_vec = vdupq_n_f32(ry_j);
+            float32x4_t my_j_vec = vdupq_n_f32(my_j);
+            float32x4_t x_j_vec = vdupq_n_f32(x_j);
+
+            int k = 0;
+            int k_unroll = 4; // Adjust based on SIMD width and M
+            for (; k <= M - k_unroll; k += k_unroll) {
+                // Load w[k:k+3, j] individually and pack into a vector
+                float w_vals[4] = {
+                    static_cast<float>(w[j * w_stride + (k + 0)]) + 0.5f,
+                    static_cast<float>(w[j * w_stride + (k + 1)]) + 0.5f,
+                    static_cast<float>(w[j * w_stride + (k + 2)]) + 0.5f,
+                    static_cast<float>(w[j * w_stride + (k + 3)]) + 0.5f
+                };
+                float32x4_t w_vec = vld1q_f32(w_vals);
+
+                // Compute temp = (w_vec * ry_j_vec * rx_k_vec) + my_j_vec + mx_k_vec
+                float32x4_t rx_k_vec = vld1q_f32(&rx_fp32[k]);
+                float32x4_t mx_k_vec = vld1q_f32(&mx_fp32[k]);
+
+                float32x4_t temp = vmulq_f32(w_vec, ry_j_vec);          // temp = w_vec * ry_j_vec
+                temp = vmulq_f32(temp, rx_k_vec);                       // temp = temp * rx_k_vec
+                temp = vaddq_f32(temp, my_j_vec);                       // temp = temp + my_j_vec
+                temp = vaddq_f32(temp, mx_k_vec);                       // temp = temp + mx_k_vec
+
+                // Accumulate y_thread[k:k+3] += x_j_vec * temp
+                float32x4_t y_acc_vec = vld1q_f32(&y_thread[k]);
+                y_acc_vec = vmlaq_f32(y_acc_vec, x_j_vec, temp);
+                vst1q_f32(&y_thread[k], y_acc_vec);
+            }
+
+            // Handle remaining elements
+            for (; k < M; ++k) {
+                float w_val = static_cast<float>(w[j * w_stride + k]) + 0.5f;
+                float rx_k = rx_fp32[k];
+                float mx_k = mx_fp32[k];
+                float temp = (w_val * ry_j * rx_k) + my_j + mx_k;
+                y_thread[k] += x_j * temp;
+            }
+        }
+    }
+
+    // Reduce y_private into y_fp
+    for (int t = 0; t < num_threads; ++t) {
+        for (int k = 0; k < M; ++k) {
+            y_fp[k] += y_private[t][k];
+        }
+    }
+}
+
+
+// #define kernel_mm_one_fp32i8 kernel_mm_one_fp32i8_v2
+#define kernel_mm_one_fp32i8 kernel_mm_one_fp32i8_v3
+
+#ifdef HAS_NEON_FP16
 // cf: rwkv/cuda/operators.cu  kernel_mm_seq_fp16i8()
 void kernel_mm_seq_fp16i8(
     const int B, const int N, const int M,
@@ -705,6 +930,7 @@ void kernel_mm_seq_fp16i8(
         }
     }
 }
+#endif //HAS_NEON_FP16
 
 void kernel_mm_seq_fp32i8(
     const int B, const int N, const int M,
@@ -740,6 +966,7 @@ void kernel_mm_seq_fp32i8(
             // Pointer to the start of the current row in w
             const uint8_t* w_row_ptr = &w[j * w_stride];
 
+            // Preload rx_fp32 and mx_fp32 values for the k loop
             int k = 0;
             int k_unroll = 4; // Process 4 elements at a time
             for (; k <= M - k_unroll; k += k_unroll) {
@@ -747,8 +974,9 @@ void kernel_mm_seq_fp32i8(
                 uint8x8_t w_u8 = vld1_u8(&w_row_ptr[k]); // Load 8 bytes
                 uint16x8_t w_u16 = vmovl_u8(w_u8);       // Expand to uint16x8_t
                 uint16x4_t w_u16_low = vget_low_u16(w_u16); // Lower 4 elements
-                uint32x4_t w_u32 = vmovl_u16(w_u16_low); // Expand to uint32x4_t
-                float32x4_t w_vec = vcvtq_f32_u32(w_u32); // Convert to float32
+                float32x4_t w_vec = vcvtq_f32_u32(vmovl_u16(w_u16_low)); // Convert to float32
+
+                // Apply dequantization (adjust for scale)
                 float32x4_t half_vec = vdupq_n_f32(0.5f);
                 w_vec = vaddq_f32(w_vec, half_vec); // w_vec = w_vec + 0.5
 
@@ -783,7 +1011,6 @@ void kernel_mm_seq_fp32i8(
         }
     }
 }
-
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Python binding
@@ -834,6 +1061,62 @@ torch::Tensor mm_one_fp32i8(
     return y;
 }
 
+torch::Tensor mm_seq_fp32i8(
+    torch::Tensor x_fp32,
+    torch::Tensor w_uint8,
+    torch::Tensor mx_fp32,
+    torch::Tensor rx_fp32,
+    torch::Tensor my_fp32,
+    torch::Tensor ry_fp32)
+{
+    // Ensure tensors are contiguous and on CPU
+    x_fp32 = x_fp32.contiguous();
+    w_uint8 = w_uint8.contiguous();
+    mx_fp32 = mx_fp32.contiguous();
+    rx_fp32 = rx_fp32.contiguous();
+    my_fp32 = my_fp32.contiguous().view(-1); // Ensure shape is (N,)
+    ry_fp32 = ry_fp32.contiguous().view(-1); // Ensure shape is (N,)
+
+    // Validate tensor data types
+    TORCH_CHECK(x_fp32.dtype() == torch::kFloat32, "x_fp32 must be Float32");
+    TORCH_CHECK(w_uint8.dtype() == torch::kUInt8, "w_uint8 must be UInt8");
+    TORCH_CHECK(mx_fp32.dtype() == torch::kFloat32, "mx_fp32 must be Float32");
+    TORCH_CHECK(rx_fp32.dtype() == torch::kFloat32, "rx_fp32 must be Float32");
+    TORCH_CHECK(my_fp32.dtype() == torch::kFloat32, "my_fp32 must be Float32");
+    TORCH_CHECK(ry_fp32.dtype() == torch::kFloat32, "ry_fp32 must be Float32");
+
+    // Get dimensions
+    int B = x_fp32.size(0);
+    int N = x_fp32.size(1);
+    int M = w_uint8.size(1);
+
+    // Strides
+    int x_stride = x_fp32.stride(0);
+    int y_stride = M; // Output y will have shape (B, M)
+    int w_stride = M; // Assuming w is row-major and contiguous
+
+    // Ensure that w is contiguous along the columns
+    TORCH_CHECK(w_uint8.stride(1) == 1, "w_uint8 must be contiguous along the inner dimension");
+
+    // Allocate output tensor y
+    torch::Tensor y = torch::empty({B, M}, torch::dtype(torch::kFloat32));
+
+    // Call the kernel function
+    kernel_mm_seq_fp32i8(
+        B, N, M,
+        x_fp32.data_ptr<float>(), x_stride,
+        w_uint8.data_ptr<uint8_t>(), w_stride,
+        mx_fp32.data_ptr<float>(),
+        rx_fp32.data_ptr<float>(),
+        my_fp32.data_ptr<float>(),
+        ry_fp32.data_ptr<float>(),
+        y.data_ptr<float>(), y_stride
+    );
+
+    return y;
+}
+
+#ifdef HAS_NEON_FP16
 torch::Tensor mm_one_fp16i8(
     torch::Tensor x_fp16,
     torch::Tensor w_uint8,
@@ -1009,65 +1292,14 @@ torch::Tensor mm_seq_fp16i8(
 
     return y;
 }
+#endif //HAS_NEON_FP16
 
-torch::Tensor mm_seq_fp32i8(
-    torch::Tensor x_fp32,
-    torch::Tensor w_uint8,
-    torch::Tensor mx_fp32,
-    torch::Tensor rx_fp32,
-    torch::Tensor my_fp32,
-    torch::Tensor ry_fp32)
-{
-    // Ensure tensors are contiguous and on CPU
-    x_fp32 = x_fp32.contiguous();
-    w_uint8 = w_uint8.contiguous();
-    mx_fp32 = mx_fp32.contiguous();
-    rx_fp32 = rx_fp32.contiguous();
-    my_fp32 = my_fp32.contiguous().view(-1); // Ensure shape is (N,)
-    ry_fp32 = ry_fp32.contiguous().view(-1); // Ensure shape is (N,)
-
-    // Validate tensor data types
-    TORCH_CHECK(x_fp32.dtype() == torch::kFloat32, "x_fp32 must be Float32");
-    TORCH_CHECK(w_uint8.dtype() == torch::kUInt8, "w_uint8 must be UInt8");
-    TORCH_CHECK(mx_fp32.dtype() == torch::kFloat32, "mx_fp32 must be Float32");
-    TORCH_CHECK(rx_fp32.dtype() == torch::kFloat32, "rx_fp32 must be Float32");
-    TORCH_CHECK(my_fp32.dtype() == torch::kFloat32, "my_fp32 must be Float32");
-    TORCH_CHECK(ry_fp32.dtype() == torch::kFloat32, "ry_fp32 must be Float32");
-
-    // Get dimensions
-    int B = x_fp32.size(0);
-    int N = x_fp32.size(1);
-    int M = w_uint8.size(1);
-
-    // Strides
-    int x_stride = x_fp32.stride(0);
-    int y_stride = M; // Output y will have shape (B, M)
-    int w_stride = M; // Assuming w is row-major and contiguous
-
-    // Ensure that w is contiguous along the columns
-    TORCH_CHECK(w_uint8.stride(1) == 1, "w_uint8 must be contiguous along the inner dimension");
-
-    // Allocate output tensor y
-    torch::Tensor y = torch::empty({B, M}, torch::dtype(torch::kFloat32));
-
-    // Call the kernel function
-    kernel_mm_seq_fp32i8(
-        B, N, M,
-        x_fp32.data_ptr<float>(), x_stride,
-        w_uint8.data_ptr<uint8_t>(), w_stride,
-        mx_fp32.data_ptr<float>(),
-        rx_fp32.data_ptr<float>(),
-        my_fp32.data_ptr<float>(),
-        ry_fp32.data_ptr<float>(),
-        y.data_ptr<float>(), y_stride
-    );
-
-    return y;
-}
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+#ifdef HAS_NEON_FP16    
     m.def("mm_one_fp16i8", &mm_one_fp16i8, "Matrix multiplication with int8 weights and float16 inputs (ARM Cortex-A76 optimized)");
-    m.def("mm_one_fp32i8", &mm_one_fp32i8, "Matrix multiplication with int8 weights and float32 inputs");
     m.def("mm_seq_fp16i8", &mm_seq_fp16i8, "Sequential matrix multiplication with int8 weights and float16 inputs (ARM Cortex-A76 optimized)");
+#endif //HAS_NEON_FP16    
+    m.def("mm_one_fp32i8", &mm_one_fp32i8, "Matrix multiplication with int8 weights and float32 inputs");
     m.def("mm_seq_fp32i8", &mm_seq_fp32i8, "Sequential matrix multiplication with int8 weights and float32 inputs");
 }

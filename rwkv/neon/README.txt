@@ -1,3 +1,8 @@
+# build and isntall 
+pip3 install -e .
+
+++++++++++++++++++++++++++++++++++++++++
+
 python3 setup.py build_ext --inplace
 
 # to show raw commands 
@@ -8,5 +13,3 @@ python3 setup.py build_ext --inplace --verbose
 # install 
 python3 setup.py develop
 
-# build and isntall 
-pip3 install -e .

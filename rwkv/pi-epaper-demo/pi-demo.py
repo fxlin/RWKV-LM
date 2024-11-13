@@ -8,7 +8,6 @@ cf: https://pypi.org/project/rwkv/
 speed benchmark res - see of file
 full res: 
 https://myuva.sharepoint.com/:x:/r/sites/XSEL-RWKV/Shared%20Documents/RWKV/results_rwkv.xlsx?d=wbf0bd61c5429469a8c039df4d8d4f46a&csf=1&web=1&e=0dyjUv
-
 https://chatgpt.com/share/6722e34c-c920-8004-a2c2-0a99a4ecee00
 
 '''
@@ -48,7 +47,6 @@ if os.environ.get('RWKV_CUDA_ON') != '0':
 the_sys_msg = ""          # status msg 
 the_tok_persec = 0.0       # token per sec
 # XXX lock them, oh well....
-
 
 ###########
 # epaper display (epd)
@@ -109,6 +107,10 @@ class EInkDisplay:
         self.system_info_thread = threading.Thread(target=self.system_info_update_worker)
         self.system_info_thread.start()
 
+        # some "marquee" visuals for the text msg displayed
+        self.prev_sys_msg = None   # the last sys msg rendered
+        self.sys_msg_offset = 0
+
     # def reset_position(self):
     #     self.y_position = self.margin
     #     self.x_position = self.margin
@@ -120,7 +122,7 @@ class EInkDisplay:
         # self.base_draw.text((10, 10), "Title", font=self.font_title, fill=0)  # Draw the title at the top
 
         # image as background, the image file orientation will affect the coordinate system
-        self.base_image = Image.open(os.path.join(picdir, "2in13/Photo_2-3icon.bmp")).rotate(-90, expand=True)
+        self.base_image = Image.open(os.path.join(picdir, "2in13/Photo_2-3iconX.bmp")).rotate(-90, expand=True)
 
         self.base_draw = ImageDraw.Draw(self.base_image)
         # self.base_image.paste(newimage, (0, 0))
@@ -306,7 +308,7 @@ class EInkDisplay:
                 # (see above) TBD...
                 self.system_info_condition.wait(timeout=1)
                 tok_persec = the_tok_persec
-                sys_msg = copy.deepcopy(the_sys_msg)                
+                sys_msg = copy.deepcopy(the_sys_msg)
             # lock released, now draw
             self.draw_system_info(tok_persec, sys_msg)
             if self.stop_thread:
@@ -334,7 +336,18 @@ class EInkDisplay:
 
         # Row 0: Display the_tok_persec, CPU util, temperature, and memory usage
         tok_persec = f"{token_per_sec:.0f}".ljust(2)
-        info_text_bottom = sys_msg[:info_text_bottom_len]   # copy, truncated to fit the area
+        
+        # Marquee effect for the system message (if it has not changed since last drawing)
+        # Pad sys_msg with spaces to the length of info_text_bottom_len
+        if len(sys_msg) < info_text_bottom_len:
+            sys_msg = sys_msg.ljust(info_text_bottom_len)
+        if self.prev_sys_msg and self.prev_sys_msg == sys_msg:  # sys_msg unchanged
+            self.sys_msg_offset = (self.sys_msg_offset + 1) % len(sys_msg)
+        else:
+            self.sys_msg_offset = 0
+        self.prev_sys_msg = sys_msg
+        rotated_sys_msg = sys_msg[self.sys_msg_offset:] + sys_msg[:self.sys_msg_offset]
+        info_text_bottom = rotated_sys_msg[:info_text_bottom_len]   # copy, truncated to fit the area
             
         cpu_usage = f"{psutil.cpu_percent():.0f}%".rjust(3)
         cpu_temp = f"{self.get_cpu_temperature():.0f}C".rjust(3)
@@ -596,15 +609,14 @@ def post_sys_msg(msg):
         
 # load model, slow.. may be preloaded in the future        
 if os.environ.get("EMU") != '1':
-    post_sys_msg(f"Load {os.path.basename(model_path).replace('.pth', '')}")
+    post_sys_msg(f"Load {os.path.basename(model_path).replace('.pth', '')}... ")
     model_load(model_path)
-    post_sys_msg(f"Model loaded")
+    post_sys_msg(f"Model loaded.READY  ")
 else: 
     post_sys_msg(f"EMU mode")
 
 # test model....
 # model_gen(print_prompt=True)
-
 try: 
     # emu only 
     if os.environ.get("EMU") == '1':
@@ -679,11 +691,23 @@ try:
                 current_prompt = random.choice(prompt_list)
                 eink_display.print_token_scroll(current_prompt.replace('\n', ''))
             # center x,y ~= 80,120
-            if touchx > 70 and touchx < 90 and touchy > 110:
+            elif touchx > 70 and touchx < 90 and touchy > 110:
                 # print("gen")
                 post_sys_msg(f"Generating...")
                 model_gen(current_prompt)
-            
+            # x,y ~= 120,120, clear
+            elif touchx > 110 and touchx < 130 and touchy > 110:
+                print("quit")
+                post_sys_msg("Quitting...")
+                eink_display.stop()
+                flag_t = 0
+                eink_display.epd.Clear(0xFF)
+                eink_display.epd.sleep()
+                time.sleep(1)
+                t.join()
+                epd2in13_V4.epdconfig.module_exit()
+                exit()
+
             # scroll controls 
             # top-right corner
             elif touchx > eink_display.yres *7//8 and touchy < eink_display.yres // 2:
@@ -718,7 +742,7 @@ except KeyboardInterrupt:
     eink_display.stop()     # render thread to quit 
     flag_t = 0          # touch thread to quit 
     eink_display.epd.sleep()
-    time.sleep(2)
+    time.sleep(1)
     t.join()           # wait for touch thread to quit
     eink_display.epd.Dev_exit()
     exit()
