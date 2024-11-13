@@ -39,11 +39,12 @@ class PIPELINE():
             self.tokenizer = tiktoken.get_encoding(WORD_NAME)
         elif WORD_NAME == 'rwkv_vocab_v20230424':
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-            from rwkv_tokenizer import TRIE_TOKENIZER
+            from rwkv_tokenizer import TRIE_TOKENIZER            
             self.tokenizer = TRIE_TOKENIZER(os.path.dirname(os.path.abspath(__file__)) + '/rwkv_vocab_v20230424.txt')        
         else:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             from tokenizers import Tokenizer
-            self.tokenizer = Tokenizer.from_file(WORD_NAME)
+            self.tokenizer = Tokenizer.from_file(os.path.dirname(os.path.abspath(__file__)) + '/' + WORD_NAME)
         print_memory_usage("after init tokenizer")    # +300 MB for tokenizer....
 
     def refine_context(self, context):

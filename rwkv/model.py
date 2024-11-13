@@ -367,11 +367,9 @@ class RWKV(MyModule):
         prxxx(f'Loading {args.MODEL_NAME} ...')
         with torch.no_grad():
             # xzl: below loads all weights to memory... (no lazy loading?? need fix
-            print_memory_usage("Before load model")
+            print_memory_usage("Before load model from disk")
             self.w = torch.load(args.MODEL_NAME, map_location='cpu', weights_only=True) # load model to CPU first
-            print_memory_usage("After load model")
             gc.collect()    # xzl: free up intermediate buffer (if any)
-            print_memory_usage("After gc")
 
             w = self.w
 
@@ -2586,9 +2584,9 @@ class RWKV(MyModule):
                 else:
                     x = self.emb.get_embedding(tokens[0])
             else:
-                print_memory_usage("before emb exec")
+                # print_memory_usage("before emb exec")
                 x = w['emb.weight'][tokens if seq_mode else tokens[0]] # xzl: 'x'-input
-                print_memory_usage("after emb exec")
+                # print_memory_usage("after emb exec")
 
             ##### xzl: below- assemble & run layers (each layer)
             #  use custom cuda impl if available, otherwise fall back to torch

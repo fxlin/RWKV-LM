@@ -58,11 +58,11 @@ import os
 # model_path='/data/models/pi-deployment/01b-pre-x58-512'
 
 #model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
-model_path='/data/models/pi-deployment/01b-pre-x59-976'
+# model_path='/data/models/pi-deployment/01b-pre-x59-976'
 # model_path='/data/models/pi-deployment/04b-tunefull-x58-562'   # works on opi0
 # model_path='/data/models/pi-deployment/04b-pre-x59-2405'
 
-# model_path='/data/models/pi-deployment/1b5-pre-x59-929'
+model_path='/data/models/pi-deployment/1b5-pre-x59-929'
 # model_path='/data/models/pi-deployment/1b5-pre-x59-929_fp16i8'
 # model_path='/data/models/pi-deployment/01b-pre-x59-CLS-TEST'
 
@@ -105,8 +105,8 @@ else:
     if is_amd_cpu():
         strategy='cpu fp32'  # amd cpu lacks hard fp16...
     else:
-         strategy='cpu fp16'
-        #strategy='cpu fp16i8'       # quant
+        #  strategy='cpu fp16'
+        strategy='cpu fp16i8'       # quant
 
 # use below to quantize model & save
 if False: 
@@ -128,6 +128,7 @@ model = RWKV(model=model_path,
 print_memory_usage("before pipeline build")
 
 pipeline = PIPELINE(model, "rwkv_vocab_v20230424")
+# pipeline = PIPELINE(model, "rwkv_vocab_v20230424.json")
 
 # ex prompt from paper: https://arxiv.org/pdf/2305.07759
 # ctx = "\nWhat is the sum of 123 and 456"
@@ -161,7 +162,6 @@ args = PIPELINE_ARGS(temperature = 1.0, top_p = 0.7, top_k = 100, # top_k = 0 th
                      chunk_len = 256) # split input into chunks to save VRAM (shorter -> slower)
 
 print_memory_usage("before generate")
-breakpoint()
 
 TOKEN_CNT = 100 
 pipeline.generate(ctx, token_count=TOKEN_CNT, args=args, callback=my_print)

@@ -8,7 +8,8 @@ class TRIE:
     values:set
     def __init__(self, front=None, ch=None):
         self.ch = ch
-        self.to = [None for ch in range(256)]
+        # self.to = [None for ch in range(256)]  
+        self.to = {}    # xzl: changed from list to dict, save more space...
         self.values = set()
         self.front = front
 
@@ -28,7 +29,8 @@ class TRIE:
             self.values.add(val)
             return self
         ch = key[idx]
-        if(self.to[ch] is None):
+        # if(self.to[ch] is None):
+        if(not ch in self.to):  # xzl
             self.to[ch] = TRIE(front=self, ch=ch)
         return self.to[ch].add(key, idx=idx+1, val=val)
     
@@ -36,7 +38,8 @@ class TRIE:
         u:TRIE = self
         ch:int = key[idx]
         
-        while(u.to[ch] is not None):
+        # while(u.to[ch] is not None):
+        while(ch in u.to):   # xzl
             u = u.to[ch]
             idx += 1
             if(u.values):
