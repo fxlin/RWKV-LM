@@ -62,8 +62,11 @@ import os
 # model_path='/data/models/pi-deployment/04b-tunefull-x58-562'   # works on opi0
 # model_path='/data/models/pi-deployment/04b-pre-x59-2405'
 
-model_path='/data/models/pi-deployment/1b5-pre-x59-929'
-# model_path='/data/models/pi-deployment/1b5-pre-x59-929_fp16i8'
+# model_path='/data/models/pi-deployment/1b5-pre-x59-929'
+model_path='/data/models/pi-deployment/1b5-pre-x59-929_fp16i8'
+
+#model_path='/data/models/pi-deployment/3b-pre-x59-533'
+
 # model_path='/data/models/pi-deployment/01b-pre-x59-CLS-TEST'
 
 # has mlp, cls (need to pass in hyperparam)
@@ -110,6 +113,7 @@ else:
 
 # use below to quantize model & save
 if False: 
+#if True:
     strategy_token = strategy.split()[1]
     basename, extension = os.path.splitext(os.path.basename(model_path))
     save_path = os.path.join(os.path.dirname(model_path), f"{basename}_{strategy_token}{extension}")

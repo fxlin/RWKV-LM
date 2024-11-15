@@ -443,13 +443,17 @@ class RWKV(MyModule):
                     args.n_head = w[x].shape[0]
             prxxx(f'Model detected: v{self.version:.2f}')
             
+            # below, decide att dim, ffn dim based on model version
+            # tricky, b/c if the model is "unconverted" (e.g. not quantized), the matrices are yet to be transposed. (cf "ALREADY_CONVERTED")
+            #   if the model is "converted" (e.g. previously quantized and saved), the matrices are already transposed and wont be transposed again
             if self.version in [5.8, 5.9]: # our mod
-                # xzl: is this right? 
-                args.n_att = w['blocks.0.att.key2.weight'].shape[0] # note: transposed matrix
+                if ALREADY_CONVERTED:
+                    args.n_att = w['blocks.0.att.key2.weight'].shape[1] # note: already transposed 
+                else: 
+                    args.n_att = w['blocks.0.att.key2.weight'].shape[0] # note: to be transposed
                 args.n_ffn = w['blocks.0.ffn.key.weight'].shape[0] # unchanged
             elif self.version in [5.94, 5.95, 5.96]:   # experimental -- not in use
-                args.n_att = w['blocks.0.att.key2.weight'].shape[0] # note: transposed matrix
-                args.n_ffn = w['blocks.0.ffn.key2.weight'].shape[0]
+                assert(0)
             else: # official model
                 args.n_att = w['blocks.0.att.key.weight'].shape[0] # note: transposed matrix
                 args.n_ffn = w['blocks.0.ffn.key.weight'].shape[0] # note: transposed matrix
@@ -736,7 +740,7 @@ class RWKV(MyModule):
                 else:
                     print_need_newline = True
                     prxxx('.', end = '', flush = True)
-            
+
             print_memory_usage("XXXXXX After conversion")
             '''
             0.1B w/o applying sparsemap to ffn.key: Process memory: 713.33 MB
