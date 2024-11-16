@@ -61,9 +61,9 @@ import os
 # model_path='/data/models/pi-deployment/01b-pre-x59-976'
 # model_path='/data/models/pi-deployment/04b-tunefull-x58-562'   # works on opi0
 # model_path='/data/models/pi-deployment/04b-pre-x59-2405'
-model_path='/data/models/pi-deployment/04b-pre-x59-2405_fp16i8'
+# model_path='/data/models/pi-deployment/04b-pre-x59-2405_fp16i8'
 
-# model_path='/data/models/pi-deployment/1b5-pre-x59-929'
+model_path='/data/models/pi-deployment/1b5-pre-x59-929'
 # model_path='/data/models/pi-deployment/1b5-pre-x59-929_fp16i8'
 
 #model_path='/data/models/pi-deployment/3b-pre-x59-533'
@@ -109,8 +109,8 @@ else:
     if is_amd_cpu():
         strategy='cpu fp32'  # amd cpu lacks hard fp16...
     else:
-        #strategy='cpu fp16'
-        strategy='cpu fp16i8'       # quant
+        strategy='cpu fp16'
+        #strategy='cpu fp16i8'       # quant
 
 # use below to quantize model & save
 if False: 
@@ -241,9 +241,9 @@ orange pi zero2w (Allwinner H618; quad CortexA53, 1.5GHz; 4GB DRAM)
 
 04b-tunefull-x58-562    2.42    
 04b-pre-x59-860         2.30
-04b-pre-x59-2405_fp16i8                   mem .5GB
+04b-pre-x59-2405_fp16i8   .86 (slow..)               mem .6GB
 
-1b5-pre-x59-929         OOM ...why
+1b5-pre-x59-929         .78             mem 2.2GB
 1b5-pre-x59-929_fp16i8  .28 (slow)        mem 1.4GB
 
 (naked cpu temp reached ~70C)
