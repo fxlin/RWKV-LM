@@ -55,15 +55,16 @@ import os
 # model_path='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-pretrain-x59/from-hpc/rwkv-976'
 
 # model_path='/data/models/pi-deployment/01b-pre-x52-1455'        # works on opi0
+# model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
 # model_path='/data/models/pi-deployment/01b-pre-x58-512'
 
-#model_path='/data/models/pi-deployment/01b-pre-x52-1455_fp16i8'     # can directly load quant model like this. cf "conversion" below
 # model_path='/data/models/pi-deployment/01b-pre-x59-976'
 # model_path='/data/models/pi-deployment/04b-tunefull-x58-562'   # works on opi0
 # model_path='/data/models/pi-deployment/04b-pre-x59-2405'
+model_path='/data/models/pi-deployment/04b-pre-x59-2405_fp16i8'
 
 # model_path='/data/models/pi-deployment/1b5-pre-x59-929'
-model_path='/data/models/pi-deployment/1b5-pre-x59-929_fp16i8'
+# model_path='/data/models/pi-deployment/1b5-pre-x59-929_fp16i8'
 
 #model_path='/data/models/pi-deployment/3b-pre-x59-533'
 
@@ -108,7 +109,7 @@ else:
     if is_amd_cpu():
         strategy='cpu fp32'  # amd cpu lacks hard fp16...
     else:
-        #  strategy='cpu fp16'
+        #strategy='cpu fp16'
         strategy='cpu fp16i8'       # quant
 
 # use below to quantize model & save
@@ -217,8 +218,8 @@ x59     01b-pre-x59-976         15.02 tok/s   mem=1GB
     quant fp32i8 v3            3.00 tok/s   mem=1.3G
 
 1b5  1b5-pre-x59-929   (on rpi5 8GB RAM) 3 tok/s        mem=4G (??
-     quant fp16i8 v3            1.95 toks/sec    mem=3.5G
-     quant fp32i8 v3            1.1 toks/sec                mem=3.5G
+     quant fp16i8 v3            1.95 toks/sec                   mem=3.5G
+     quant fp32i8 v3            1.1 toks/sec (kinda slow)       mem=3.5G
 
 --------------
 rpi4  (BCM2711, quad Cortex-A72, 1.5GHz, 8GB)
@@ -235,10 +236,15 @@ x59     01b-pre-x59-976         3.1
 orange pi zero2w (Allwinner H618; quad CortexA53, 1.5GHz; 4GB DRAM)
                         tok/sec
 01b-pre-x52-1455        4.96
-01b-pre-x52-1455 fp16i8 (<1) # very slow, and mem saving is not significant?
+01b-pre-x52-1455 fp16i8 1.37   (slow??)             mem .44 GB
 01b-pre-x59-976         4.72
+
 04b-tunefull-x58-562    2.42    
 04b-pre-x59-860         2.30
+04b-pre-x59-2405_fp16i8                   mem .5GB
+
+1b5-pre-x59-929         OOM ...why
+1b5-pre-x59-929_fp16i8  .28 (slow)        mem 1.4GB
 
 (naked cpu temp reached ~70C)
 board level power: 0.43A@5.25v

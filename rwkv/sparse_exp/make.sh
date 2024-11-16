@@ -1,7 +1,7 @@
 # these need: 
 # sudo apt install libblas-dev
-# sudo apt install libopenblas-dev
-# sudo apt-get install libexplain-dev
+# sudo apt install -y libopenblas-dev
+# sudo apt install -y libexplain-dev
 gcc -o sgemv_example sgemv_example.c -lopenblas -O2 -g
 # -rt for high precision timer
 gcc -o test-mmap-overlay test-mmap-overlay.c -lrt  -O2 -g
