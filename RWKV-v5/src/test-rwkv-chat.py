@@ -64,11 +64,14 @@ import os
 # model_path='/data/models/pi-deployment/04b-pre-x59-2405_fp16i8'
 
 model_path='/data/models/pi-deployment/1b5-pre-x59-929'
-# model_path='/data/models/pi-deployment/1b5-pre-x59-929_fp16i8'
+# # model_path='/data/models/pi-deployment/1b5-pre-x59-929_fp16i8'
 
 #model_path='/data/models/pi-deployment/3b-pre-x59-533'
+# model_path='/data/models/pi-deployment/3b-pre-x59-533_fp16i8'  # NaN???
 
-# model_path='/data/models/pi-deployment/01b-pre-x59-CLS-TEST'
+# OOM on rpi5 8g (even for conversion
+#model_path='/data/models/pi-deployment/RWKV-5-World-3B-v2-20231113-ctx4096'
+
 
 # has mlp, cls (need to pass in hyperparam)
 # model_path='/data/models/orin-deployment/01b-x59'
@@ -113,8 +116,8 @@ else:
         #strategy='cpu fp16i8'       # quant
 
 # use below to quantize model & save
-if False: 
-#if True:
+# if False: 
+if True:
     strategy_token = strategy.split()[1]
     basename, extension = os.path.splitext(os.path.basename(model_path))
     save_path = os.path.join(os.path.dirname(model_path), f"{basename}_{strategy_token}{extension}")
@@ -166,7 +169,7 @@ args = PIPELINE_ARGS(temperature = 1.0, top_p = 0.7, top_k = 100, # top_k = 0 th
                      token_stop = [], # stop generation whenever you see any token here
                      chunk_len = 256) # split input into chunks to save VRAM (shorter -> slower)
 
-print_memory_usage("before generate")
+# print_memory_usage("before generate")
 
 TOKEN_CNT = 100 
 pipeline.generate(ctx, token_count=TOKEN_CNT, args=args, callback=my_print)
