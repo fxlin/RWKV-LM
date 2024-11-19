@@ -724,6 +724,7 @@ class RWKV(MyModule):
 
                 # build head_l2, but by splitting the original cls head weights
                 self.head_l2org_weight = []
+                self.head_l2org_weight_i8 = []
 
                 for cls in range(0, len(clusters)):
                     # NB: w['head.weight'] shape (D,vocab), already transposed
@@ -731,8 +732,16 @@ class RWKV(MyModule):
                     idx = torch.tensor(clusters[cls], device=orghead.device)
                     # ww = torch.gather(input=orghead,dim=0,index=idx)
                     ww = orghead[idx]
-                    w[f'head_l2org.{cls}.weight'] = ww # save it in dict
-                    self.head_l2org_weight.append(ww.t())   # alternatively, save in list  
+                    cls_name = f'head_l2org.{cls}.weight'
+                    w[cls_name] = ww.t().contiguous() # save it in dict
+                    if ww.dtype == torch.uint8:  # xzl: (default weight) cast to WTYPE
+                        mx = w[cls_name + "_mx"] = w['head.weight_mx'][idx]
+                        rx = w[cls_name + "_rx"] = w['head.weight_rx'][idx]
+                        my = w[cls_name + "_my"] = w['head.weight_my']
+                        ry = w[cls_name + "_ry"] = w['head.weight_ry']
+                        head_i8 = (mx, rx, my, ry)
+                        self.head_l2org_weight_i8.append(head_i8)
+                    self.head_l2org_weight.append(w[cls_name])   # alternatively, save in list  
 
                 # cf rwkv/utils.py generate()
                 # XXX move it out of "model", to "pipeline"
@@ -741,6 +750,14 @@ class RWKV(MyModule):
                 # avoid indexing "w" (the model state dict) inside _retrieve_value3(), which 
                 # prevents it from using torch.script... 
                 self.head_l1_weight = w['head_l1.weight']
+                if self.head_l1_weight.dtype == torch.uint8:
+                    self.head_l1_weight_i8 = (
+                            w['head_l1.weight_mx'],
+                            w['head_l1.weight_rx'],
+                            w['head_l1.weight_my'],
+                            w['head_l1.weight_ry'])
+                else:
+                    self.head_l1_weight_i8 = None
                 self.vocab = w['head.weight'].shape[1]   # shape D,vocab
 
                 # we no longer need the original head weight, delete it to save memory
@@ -2207,7 +2224,8 @@ class RWKV(MyModule):
 
     # def _retrieve_value3(self, x, w, head_l1_weight, head_l2org_weight):
     # @MyFunction   # does not matter much???
-    def _retrieve_value3_jit(self, x, head_l1_weight, head_l2org_weight: List[torch.Tensor], verbose=False):
+    def _retrieve_value3_jit(self, x, head_l1_weight, head_l2org_weight: List[torch.Tensor], 
+                             l1_i8=None, l2_i8=None, verbose=False):
         # N=200 # of cls we'll sample
         # N=80 # of cls we'll sample
         N=5 # of cls we'll sample
@@ -2216,7 +2234,12 @@ class RWKV(MyModule):
 
         # l1 projection, x: shape (1,D) (regardless of seq_mode
         # x1 = x @ w['head_l1.weight']  # shape (D,#total_cls(200))
-        x1 = x @ head_l1_weight
+        if head_l1_weight.dtype != torch.uint8:
+            x1 = x @ head_l1_weight
+        else:
+            # tt0=time.time()
+            x1= mm8_one(x, head_l1_weight, *l1_i8)
+            # print(f"mm8_one time: {time.time()-tt0:.2f} sec")
         
         # CLS, CLSPROBS = self.sample_logits(x1, temperature=1.0, top_p=0.85, top_k=N,
         #                          size=N, replace=False)
@@ -2261,7 +2284,12 @@ class RWKV(MyModule):
             tt0 = time.time()
 
             # x1 = x @ w[f'head_l2org.{cls}.weight'] 
-            x1 = (x @ head_l2org_weight[cls]).to("cpu")
+            
+            if head_l2org_weight[cls].dtype != torch.uint8:
+                x1 = (x @ head_l2org_weight[cls]).to("cpu")
+            else:
+                #print(head_l2org_weight[cls])
+                x1 = mm8_one(x, head_l2org_weight[cls], *(l2_i8[cls])).to("cpu")
             # WC: stabilize the exp(logits) by subtracting the max value
             # https://blester125.com/blog/softmax.html#:~:text=Subtracting%20the%20maximum%20from%20all,subsequent%20sum%20will%20never%20overflow.
             exp_x1 = torch.exp(x1 - x1.max())
@@ -3547,12 +3575,20 @@ class RWKV(MyModule):
                     new_x = []
                     self.cached_orgx = x
                     for row in x:
-                        temp_x = self._retrieve_value3_jit(row, self.head_l1_weight, self.head_l2org_weight)
+                        if self.head_l2org_weight[0].dtype != torch.uint8:
+                            temp_x = self._retrieve_value3_jit(row, self.head_l1_weight, self.head_l2org_weight)
+                        else:
+                            temp_x = self._retrieve_value3_jit(row, self.head_l1_weight, self.head_l2org_weight,
+                                                               self.head_l1_weight_i8, self.head_l2org_weight_i8)
                         new_x.append(temp_x)
                         num_tokens += x.shape[0]
                     x = torch.stack(new_x)
                 else:
-                    x = self._retrieve_value3_jit(x, self.head_l1_weight, self.head_l2org_weight)
+                    if self.head_l2org_weight[0].dtype != torch.uint8:
+                        x = self._retrieve_value3_jit(x, self.head_l1_weight, self.head_l2org_weight)
+                    else:
+                        x = self._retrieve_value3_jit(x, self.head_l1_weight, self.head_l2org_weight,
+                                                      self.head_l1_weight_i8, self.head_l2org_weight_i8)
                     num_tokens += x.shape[0]
                 self.stat_loaded_tokens += num_tokens
 
