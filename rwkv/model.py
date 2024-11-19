@@ -310,7 +310,7 @@ class RWKV(MyModule):
         self.stat_time_ffn_kx_kw = 0.0
         self.stat_time_ffn_vx_vw = 0.0
 
-        self.lazy_emb = True
+        self.lazy_emb = False
 
         self.sparse_outpath = sparse_outpath # collect sparse data inf FFN
 
@@ -863,8 +863,47 @@ class RWKV(MyModule):
         out = r * v
         return x + out, xx
 
+    #  ---- dump FFN weights & inputs ---- 
+    # @MyFunction
+    def ffn_one_v5_8_dump(self, x, sx, ln_w, ln_b, k_mix, r_mix, kw, vw,
+                         rw1, rw2,
+                         kmx, krx, kmy, kry, vmx, vrx, vmy, vry, 
+                         rmx1, rrx1, rmy1, rry1,
+                         rmx2, rrx2, rmy2, rry2,
+                         layer_id,       # xzl
+                         ):
+        xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
+        kx = xx * k_mix + sx * (1 - k_mix)
+        rx = xx * r_mix + sx * (1 - r_mix)
+        
+        # r = torch.sigmoid(matmul(rx, rw, rmx, rrx, rmy, rry)) # orig
+        r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
+        r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2)
+        r = torch.sigmoid(r)
+        # xzl: below: FFN core
+        outpath = self.sparse_outpath
+        outpath_weights=f'{outpath}/FFN.key-layer{layer_id}-weights.npy'
+
+        k = matmul(kx, kw, kmx, krx, kmy, kry)  
+        vx = torch.relu(k) ** 2     # xzl: vx sparse activation.
+        # count zeros... 
+        '''
+        zero_mask = torch.eq(vx, 0)
+        num_zeros = torch.sum(zero_mask)
+        print(num_zeros)
+        breakpoint()
+        '''
+        v = matmul(vx, vw, vmx, vrx, vmy, vry)
+        
+        # weight is saved here
+        # only kx will be saved later in the pipeline
+        self.save_tensor_if_not_exists(kw, outpath_weights)
+
+        out = r * v
+        return x + out, xx, kx
+
     # xzl: ours, based on above
-    @MyFunction
+    #@MyFunction
     def ffn_one_v5_8(self, x, sx, ln_w, ln_b, k_mix, r_mix, kw, vw, 
                      rw1, rw2, # sans rwdiag, 
                      kmx, krx, kmy, kry, vmx, vrx, vmy, vry, 
@@ -952,7 +991,7 @@ class RWKV(MyModule):
         r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         r = torch.relu(r) ** 2
         r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2)
-        r += rx @ torch.diag(rwdiag)   # xzl: should use matmul??
+        r += rx * rwdiag   # xzl: should use matmul??
         r = torch.sigmoid(r)
         # xzl: below: FFN core
         outpath = self.sparse_outpath
@@ -975,6 +1014,7 @@ class RWKV(MyModule):
 
         out = r * v
         return x + out, xx, kx
+
 
     # --- mlp test ---- 
     # @MyFunction
@@ -1225,8 +1265,37 @@ class RWKV(MyModule):
         out = r * matmul(vx, vw, vmx, vrx, vmy, vry)
         return x + out, xx[-1,:]
 
+    def ffn_seq_v5_8_dump(self, x, sx, ln_w, ln_b, k_mix, r_mix, kw, vw,
+                     rw1, rw2,
+                     kmx, krx, kmy, kry, 
+                     vmx, vrx, vmy, vry, 
+                     rmx1, rrx1, rmy1, rry1,
+                     rmx2, rrx2, rmy2, rry2,
+                     layer_id,      # xzl 
+                          ):
+
+        xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
+        sx = torch.cat((sx.unsqueeze(0), xx[:-1,:]))
+        kx = xx * k_mix + sx * (1 - k_mix)
+        rx = xx * r_mix + sx * (1 - r_mix)
+
+        # r = torch.sigmoid(matmul(rx, rw, rmx, rrx, rmy, rry)) # orig
+        r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
+        r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2)
+        r = torch.sigmoid(r)        
+
+        # ------ FFN core ----------
+        # actual compute
+        k = matmul(kx, kw, kmx, krx, kmy, kry)  
+        vx = torch.relu(k) ** 2     # xzl: vx sparse activation.
+
+        v = matmul(vx, vw, vmx, vrx, vmy, vry)
+
+        out = r * v
+        return x + out, xx[-1,:], None
+
     # xzl: ours, based on above
-    @MyFunction
+    #@MyFunction
     def ffn_seq_v5_8(self, x, sx, ln_w, ln_b, k_mix, r_mix, kw, vw, 
                      rw1, rw2, # sans rwdiag, 
                      kmx, krx, kmy, kry, 
@@ -1253,6 +1322,7 @@ class RWKV(MyModule):
         out = r * matmul(vx, vw, vmx, vrx, vmy, vry)
         return x + out, xx[-1,:]
 
+
     def ffn_seq_v5_9_dump(self, x, sx, ln_w, ln_b, k_mix, r_mix, kw, vw,
                      rw1, rw2, rwdiag, 
                      kmx, krx, kmy, kry, 
@@ -1271,7 +1341,7 @@ class RWKV(MyModule):
         r = matmul(rx, rw1, rmx1, rrx1, rmy1, rry1) 
         r = torch.relu(r) ** 2
         r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2)
-        r += rx @ torch.diag(rwdiag)   # xzl: use matmul??
+        r += rx * rwdiag   # xzl: use matmul??
         r = torch.sigmoid(r)        
 
         # ------ FFN core ----------
@@ -2530,7 +2600,10 @@ class RWKV(MyModule):
                     if self.version >= 6.0:
                         FFN = self.ffn_seq_v6
                     elif self.version == 5.8:
-                        FFN = self.ffn_seq_v5_8
+                        if self.sparse_outpath is not None:
+                            FFN = self.ffn_seq_v5_8_dump
+                        else:
+                            FFN = self.ffn_seq_v5_8
                     elif self.version == 5.9:
                         if self.sparse_outpath is not None:
                             FFN = self.ffn_seq_v5_9_dump
@@ -2561,7 +2634,10 @@ class RWKV(MyModule):
                     if self.version >= 6.0:
                         FFN = self.ffn_one_v6
                     elif self.version == 5.8:
-                        FFN = self.ffn_one_v5_8
+                        if self.sparse_outpath is not None:
+                            FFN = self.ffn_one_v5_8_dump
+                        else:
+                            FFN = self.ffn_one_v5_8
                     elif self.version == 5.9:
                         if self.sparse_outpath is not None:
                             FFN = self.ffn_one_v5_9_dump
@@ -2909,19 +2985,49 @@ class RWKV(MyModule):
                         rmx2, rrx2, rmy2, rry2,
                         )
                 elif self.version in [5.8]:
-                    x, state[offset] = FFN(
-                        x, state[offset],
-                        w[f'{bbb}ln2.weight'], w[f'{bbb}ln2.bias'],
-                        w[f'{ffn}time_mix_k'], w[f'{ffn}time_mix_r'],
-                        kw, vw, 
-                        # rw,
-                        rw1, rw2, # sans diag 
-                        kmx, krx, kmy, kry,
-                        vmx, vrx, vmy, vry,
-                        rmx1, rrx1, rmy1, rry1,
-                        rmx2, rrx2, rmy2, rry2,
-                        i   # xzl, layer_id                        
-                        )
+                    if self.sparse_outpath is not None:
+                        x, state[offset], sparse_tensor = FFN(
+                            x, state[offset],
+                            w[f'{bbb}ln2.weight'], w[f'{bbb}ln2.bias'],
+                            w[f'{ffn}time_mix_k'], w[f'{ffn}time_mix_r'],
+                            kw, vw,
+                            rw1, rw2,
+                            kmx, krx, kmy, kry,
+                            vmx, vrx, vmy, vry,
+                            rmx1, rrx1, rmy1, rry1,
+                            rmx2, rrx2, rmy2, rry2,
+                            i,   # xzl, layer_id
+                            )
+                        # save a tensofr for each layer:
+                        if sparse_tensor is not None:
+                            # only ffn_one will give NOT None
+                            sparse_tensor_list.append(sparse_tensor)
+                    else:
+                        if self.mlp_map is not None:
+                            mlp_weights = (w[f'{bbb}mlp.fc1.weight'], w[f'{bbb}mlp.fc2.weight'])
+                        else:
+                            mlp_weights = None
+
+                        if self.quant_bit is not None:
+                            quant_weight = w[f'{ffn}key.weight{self.quant_bit}b']
+                        else:
+                            quant_weight = None
+
+                        x, state[offset] = FFN(
+                            x, state[offset],
+                            w[f'{bbb}ln2.weight'], w[f'{bbb}ln2.bias'],
+                            w[f'{ffn}time_mix_k'], w[f'{ffn}time_mix_r'],
+                            kw, vw,
+                            rw1, rw2,
+                            kmx, krx, kmy, kry,
+                            vmx, vrx, vmy, vry,
+                            rmx1, rrx1, rmy1, rry1,
+                            rmx2, rrx2, rmy2, rry2,
+                            i,   # xzl, layer_id
+                            mlp_weights=mlp_weights,
+                            quant_weight=quant_weight,
+                            time_measure=time_measure,
+                            )
                 elif self.version < 6.0:
                     x, state[offset] = FFN(
                         x, state[offset],
