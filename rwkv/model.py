@@ -990,7 +990,10 @@ class RWKV(MyModule):
         if pred is not None:
             vx = vx * pred
 
+        mm_start_t = time.time()
         out = r * matmul(vx, vw, vmx, vrx, vmy, vry)
+        mm_end_t = time.time()
+        time_measure['ffn_vx_vw'] += mm_end_t - mm_start_t
         return x + out, xx
 
     # def load_tensors(file_path):
