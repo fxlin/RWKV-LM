@@ -593,6 +593,7 @@ class RWKV(MyModule):
                                     w[x] = w[x] / w[x+'_ry']
 
                                 w[x] = torch.clip(torch.floor(w[x] * 256), min=0, max=255).to(dtype=torch.uint8)
+
                                 # xzl: all scales, biases contig....by default contig in mem                    
                                 w[x+'_mx'] = w[x+'_mx'].to(dtype=ATYPE).contiguous()
                                 # 16 might be further quantization for storage efficiency
@@ -941,7 +942,54 @@ class RWKV(MyModule):
         r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2)
         r = torch.sigmoid(r)
 
+        # MLP predictor        
+        mlp_exec_start_t = time.time()
+        mlp_pred = None
+        if mlp_weights is not None:
+            thr = self.mlp_map[layer_id] # MLP threshold
+            mlpfc1, mlpfc2 = mlp_weights
+            mlp_pred = torch.relu(kx @ mlpfc1) @ mlpfc2  # logits
+            mlp_pred = torch.sigmoid(mlp_pred) 
+            mlp_pred = (mlp_pred > thr).int()
+        mlp_exec_end_t = time.time()
+
+        # --- quant pred, n bit    
+        quant_pred = None
+        quant_exec_start_t = time.time()
+        if quant_weight is not None:
+            kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
+            kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit)
+            result = (kx @ kw_nbit_dequant).float()
+            percent = self.quant_map[layer_id] # percentile, we use to take quant as activated
+
+            # --- predict percentile as "activated"
+            percentile = torch.quantile(result, percent).item()
+            quant_pred = (result > percentile).int()
+        quant_exec_end_t = time.time()
+
+        time_measure['mlp_exec'] += mlp_exec_end_t - mlp_exec_start_t
+        time_measure['quant_exec'] += quant_exec_end_t - quant_exec_start_t
+
+        pred = None
+        if mlp_pred is not None and quant_pred is not None:
+            pred = mlp_pred | quant_pred    # ensemble
+        elif mlp_pred is not None:
+            pred = mlp_pred
+        elif quant_pred is not None:
+            pred = quant_pred
+        
+        # actual compute
+        mm_start_t = time.time()
+
         vx = torch.relu(matmul(kx, kw, kmx, krx, kmy, kry)) ** 2
+        mm_end_t = time.time()
+
+        time_measure['ffn_kx_kw'] += mm_end_t - mm_start_t
+
+        # simulate the pred ... 
+        if pred is not None:
+            vx = vx * pred
+
         out = r * matmul(vx, vw, vmx, vrx, vmy, vry)
         return x + out, xx
 
@@ -1335,7 +1383,57 @@ class RWKV(MyModule):
         r = matmul(r, rw2, rmx2, rrx2, rmy2, rry2)
         r = torch.sigmoid(r)        
 
+        # MLP predictor        
+        time_measure['mlp_exec_start'] = time.time()
+        mlp_pred = None
+        if mlp_weights is not None:
+            thr = self.mlp_map[layer_id] # MLP threshold
+            mlpfc1, mlpfc2 = mlp_weights
+            mlp_pred = torch.relu(kx @ mlpfc1) @ mlpfc2  # logits
+            mlp_pred = torch.sigmoid(mlp_pred) 
+            mlp_pred = (mlp_pred > thr).int()
+        time_measure['mlp_exec_end'] = time.time()
+
+        # --- quant pred, n bit    
+        quant_pred = None
+        time_measure['quant_exec_start'] = time.time()
+        if quant_weight is not None:
+            kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
+            kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit).to(kx.device)
+            result = (kx @ kw_nbit_dequant).float()
+
+            percent = self.quant_map[layer_id] # percentile, we use to take quant as activated
+
+            # --- predict percentile as "activated"
+            percentile = torch.quantile(result, percent).item()
+            quant_pred = (result > percentile).int()
+
+        time_measure['quant_exec_end'] = time.time()
+
+
+        time_measure['mlp_exec'] = time_measure['mlp_exec_end'] - time_measure['mlp_exec_start']
+        time_measure['quant_exec'] = time_measure['quant_exec_end'] - time_measure['quant_exec_start']
+
+        pred = None
+        if mlp_pred is not None and quant_pred is not None:
+            pred = mlp_pred | quant_pred    # ensemble
+        elif mlp_pred is not None:
+            pred = mlp_pred
+        elif quant_pred is not None:
+            pred = quant_pred
+
+
+        # actual compute
+        mm_start_t = time.time()
         vx = torch.relu(matmul(kx, kw, kmx, krx, kmy, kry)) ** 2
+        mm_end_t = time.time()
+
+        time_measure['ffn_kx_kw'] += mm_end_t - mm_start_t
+
+
+        # simulate the pred ...
+        if pred is not None:       # all layers sparse
+            vx = vx * pred
         out = r * matmul(vx, vw, vmx, vrx, vmy, vry)
         return x + out, xx[-1,:]
 
