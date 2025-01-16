@@ -432,12 +432,13 @@ def do_eval(model_path, isverbose=False, benchmarks=[]):
     # {'results': {'hellaswag': {'acc': 0.2921728739294961, 'acc_stderr': 0.004538319464111977, 'acc_norm': 0.31955785700059747, 'acc_norm_stderr': 0.0046535230383693855}}, 'versions': {'hellaswag': 0}}
     # print(results['results'])
 
+    ''' #disabled by FL
     if model.stat_runs != 0: 
         print(model.stat_runs)
         print(f"stats: runs: {model.stat_runs} \
         cls/run {model.stat_loaded_cls/model.stat_runs:.2f} \
         tokens/run {model.stat_loaded_tokens/model.stat_runs/65535:.2f}")
-    
+    '''
     return results['results']
 
 def clean_cache():

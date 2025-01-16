@@ -2462,7 +2462,7 @@ class RWKV(MyModule):
             # xzl: seq_mode=True for prompt encoding; =False for autoregression
             #   eval also uses seq_mode
             seq_mode = len(tokens) > 1
-            #self.lazy_emb = False
+            self.lazy_emb = False       # xzl
             if self.lazy_emb:
                 if seq_mode:
                     x = self.emb.get_embeddings(tokens)
