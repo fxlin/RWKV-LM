@@ -110,9 +110,16 @@ float* load_matrix_from_file_mmap_madvise(const char *filename, int M, int N) {
         exit(1);
     }
 
-    int page_count = size / 4096; 
-    size_t advise_offset = 2 * 4096;  
-    size_t advise_length = (page_count-2) * 4096; 
+    long page_size = sysconf(_SC_PAGESIZE);
+    if (page_size == -1) {
+        perror("Error with sysconf");
+        return 1;
+    }
+
+    //int page_count = size / 4096; 
+    int page_count = size / page_size; 
+    size_t advise_offset = 2 * page_size;  
+    size_t advise_length = (page_count-2) * page_size; 
 
     if (madvise((char*)mapped_A + advise_offset, advise_length, MADV_DONTNEED) == -1) {
         perror("Error with madvise");
@@ -122,7 +129,7 @@ float* load_matrix_from_file_mmap_madvise(const char *filename, int M, int N) {
     }
 
     printf("Marked region from page %lu to %lu as unneeded using MADV_DONTNEED.\n", 
-           (unsigned long)advise_offset/4096, (unsigned long)(advise_offset + advise_length)/4096);
+           (unsigned long)advise_offset/page_size, (unsigned long)(advise_offset + advise_length)/page_size);
 
     // check 
     printf("%s\n", __func__); 
@@ -157,9 +164,18 @@ float* load_matrix_from_file_mmap_overlay(const char *filename, int M, int N) {
         exit(1);
     }
 
-    int page_count = size / 4096; 
-    size_t advise_offset = 2 * 4096;  
-    size_t advise_length = (page_count-2) * 4096;   // ~99 sparisty
+    long page_size = sysconf(_SC_PAGESIZE);
+    if (page_size == -1) {
+        perror("Error with sysconf");
+        close(fd);
+        exit(1);
+    }
+
+    printf("page size: %ld\n", page_size);
+
+    int page_count = size / page_size; 
+    size_t advise_offset = 2 * page_size;  
+    size_t advise_length = (page_count-2) * page_size;   // ~99 sparisty
     // size_t advise_length = 2 * 4096; 
 
     if (mmap(mapped_A + advise_offset, advise_length, PROT_READ,
@@ -171,11 +187,11 @@ float* load_matrix_from_file_mmap_overlay(const char *filename, int M, int N) {
     }
 
     printf("Marked region from page %lu to %lu as unneeded using MADV_DONTNEED.\n", 
-           (unsigned long)advise_offset/4096, (unsigned long)(advise_offset + advise_length)/4096);
+           (unsigned long)advise_offset/page_size, (unsigned long)(advise_offset + advise_length)/page_size);
 
     // check 
     printf("%s\n", __func__); 
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 30; i++) {
         printf("%f ", mapped_A[i]);
     } // should have values
     printf("\n--------------------\n");
@@ -312,7 +328,7 @@ int main(int argc, char *argv[]) {
     const float beta = 0.0f;
 
     // Measure the start time
-     start_time = get_time_in_seconds();
+    start_time = get_time_in_seconds();
 
     // Perform matrix-vector multiplication Y = alpha * A * X + beta * Y
     cblas_sgemv(CblasRowMajor, CblasNoTrans, M, N, alpha, A, N, X, 1, beta, Y, 1);
