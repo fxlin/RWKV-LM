@@ -18,8 +18,8 @@ if os.environ.get('RWKV_CUDA_ON') != '0':
     os.environ["RWKV_CUDA_ON"] = '1' #default
 
 RWKV_HOME = os.environ.get("RWKV_HOME") # User specific. See env-amd.sh
-model_path=f'{RWKV_HOME}/RWKV-v5/out/04b-pre-x59-8x-sparsity/rwkv-2405'
-sparse_path=f'{RWKV_HOME}/RWKV-v5/out/04b-pre-x59-8x-sparsity'
+model_path=f'{RWKV_HOME}/RWKV-v5/out/04b-official-sparsity/04b-official'
+sparse_path=f'{RWKV_HOME}/RWKV-v5/out/04b-official-sparsity'
 
 COLLECT_SPARSITY_DATA = True
 print(f'Loading model - {model_path}')
@@ -57,10 +57,13 @@ for n in range(N_LAYERS):
 data = load_dataset("Open-Orca/OpenOrca", data_files="1M-GPT4-Augmented.parquet")["train"]
 
 ctx_list = []
-for row in data:
+for i, row in enumerate(data):
     attr1 = row["system_prompt"]
     attr2 = row["question"]
     ctx_list.append( f"\n{attr1}\n{attr2}")
+
+    if i == 25:
+        break
 
 print(f"len of ctx_list: {len(ctx_list)}")
 
@@ -78,9 +81,11 @@ This generates the data for the sparsity training
 """ 
 
 p_tensors = []
-for i, ctx in enumerate(ctx_list[:500]):
+for i, ctx in enumerate(ctx_list):
+    print("====================================")
     print(f"\nPrompt [{i}]: ...")
     print(ctx, end='')
+    print("====================================")
     _, t_data = pipeline.generate(ctx, token_count=200, args=args, callback=my_print,
                                   collect_sparse_data=COLLECT_SPARSITY_DATA)
     p_tensors.append(t_data)
@@ -95,7 +100,7 @@ for p in p_tensors:
 # --- sanity check
 for n in range(N_LAYERS):
     print(f"layer {n}: {len(dict_tensors[n])}")
-    outpath_query=f'{model_dir}/FFN.key-layer{n}-query.npy'
+    outpath_query=f'{sparse_path}/FFN.key-layer{n}-query.npy'
     try:
         tensor_list = torch.load(outpath_query, weights_only=True)
         print(f"\n{len(tensor_list)}")
@@ -106,4 +111,4 @@ for n in range(N_LAYERS):
 
     tensor_list += dict_tensors[n]
     print(f"{len(tensor_list)}")
-    #torch.save(tensor_list, outpath_query)
+    torch.save(tensor_list, outpath_query)
