@@ -97,3 +97,26 @@ minipile.bin    minipile.idx
 | 3B            | 32          | 2560          |
 | 7B            | 32          | 4096          |
 
+
+# TODO
+- Features
+    - [ ] Hierarchical head example
+    - [ ] Sparsity FFN example
+    - [ ] NEON instruction
+
+- Training
+    - [x] SVD training
+    - [ ] add hierarchical head training
+    - [ ] add sparsity ffn training
+
+- Inference
+    - [ ] A toy example for inference e.g., chat
+    - [ ] RPI inference
+    
+- Evaluation
+    - [x] run `lm-evaluation-harness` example
+
+- Data collection
+    - [x] minipile
+    - [ ] add sparsity data collection
+    - [ ] General dataset preparation e.g., pile
