@@ -288,7 +288,7 @@ if os.environ.get('RWKV_DML_ON') == '1':
 class RWKV(MyModule):
     def __init__(self, model, strategy, verbose = True, convert_and_save_and_exit = None,
                  sparse_outpath = None, quant_bit = None, quant_map = None, mlp_map = None,
-                 load_token_cls = None):
+                 load_token_cls = None, on_cluster_head = False):
         super().__init__()
         if verbose:
             prxxx = lambda *args, **kwargs: print(*args, **kwargs)
@@ -311,6 +311,7 @@ class RWKV(MyModule):
         self.stat_time_ffn_vx_vw = 0.0
 
         self.lazy_emb = False
+        self.on_cluster_head = False
 
         self.sparse_outpath = sparse_outpath # collect sparse data inf FFN
 
@@ -523,6 +524,10 @@ class RWKV(MyModule):
                     w[x+'4b']   = quantize(w[x].t().to(DEVICE), 4)   # a tuple
                     w[x+'2b']   = quantize(w[x].t().to(DEVICE), 2)   # a tuple
                     w[x+'1b']   = quantize(w[x].t().to(DEVICE), 1)   # a tuple
+                    # wc: dequantize is too slow and costs too much per layer so we do it here
+                    w[x+'4b_deq']   = dequantize(*w[x+'4b'])
+                    w[x+'2b_deq']   = dequantize(*w[x+'2b'])
+                    w[x+'1b_deq']   = dequantize(*w[x+'1b'])
 
                 if not ALREADY_CONVERTED:
                     if self.RESCALE_LAYER > 0:  # xzl we didnt touch these..
@@ -673,7 +678,7 @@ class RWKV(MyModule):
 
             ##### xzl: load & build cls lookup table. do it AFTER all weights are transposed, converted
             # self.head_l2org_weight: List[torch.Tensor] = []
-            if 'head_l1.weight' in w: # use compressed cls heads                
+            if 'head_l1.weight' in w and self.on_cluster_head: # use compressed cls heads                
                 import numpy as np
                 args.head_K = 200    # XXX
                 '''
@@ -865,7 +870,32 @@ class RWKV(MyModule):
 
     # xzl: this 
     #@MyFunction
+    def ffn_one_dump(self, x, sx, ln_w, ln_b, k_mix, r_mix, kw, vw, rw, kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry,
+                layer_id,
+    ):
+        xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
+        kx = xx * k_mix + sx * (1 - k_mix)
+        rx = xx * r_mix + sx * (1 - r_mix)
+
+        r = torch.sigmoid(matmul(rx, rw, rmx, rrx, rmy, rry))
+
+        outpath = self.sparse_outpath
+        outpath_weights=f'{outpath}/FFN.key-layer{layer_id}-weights.npy'
+        self.save_tensor_if_not_exists(kw, outpath_weights)
+
+        k = matmul(kx, kw, kmx, krx, kmy, kry)  
+
+        vx = torch.relu(k) ** 2     # xzl: vx sparse activation.
+        v = matmul(vx, vw, vmx, vrx, vmy, vry)
+
+
+        out = r * v
+        return x + out, xx, kx
+
     def ffn_one(self, x, sx, ln_w, ln_b, k_mix, r_mix, kw, vw, rw, kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry,
+                layer_id,
+                mlp_weights = None,
+                quant_weight = None,
     ):
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
         kx = xx * k_mix + sx * (1 - k_mix)
@@ -875,7 +905,44 @@ class RWKV(MyModule):
 
         k = matmul(kx, kw, kmx, krx, kmy, kry)  
 
+        # Sparsity predictor
+        mlp_pred = None
+        if mlp_weights is not None:
+            thr = self.mlp_map[layer_id] # MLP threshold
+            mlpfc1, mlpfc2 = mlp_weights
+            mlp_pred = torch.relu(kx @ mlpfc1) @ mlpfc2  # logits
+            mlp_pred = torch.sigmoid(mlp_pred) 
+            mlp_pred = (mlp_pred > thr).int()
+
+        # --- quant pred, n bit    
+        quant_pred = None
+        if quant_weight is not None:
+            # wc: dequantized ahead of time
+            #kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
+            #kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit)
+            kw_nbit_dequant = quant_weight
+            result = (kx @ kw_nbit_dequant).float()
+            percent = self.quant_map[layer_id] # percentile, we use to take quant as activated
+
+            # --- predict percentile as "activated"
+            percentile = torch.quantile(result, percent).item()
+            quant_pred = (result > percentile).int()
+
+
+        pred = None
+        if mlp_pred is not None and quant_pred is not None:
+            pred = mlp_pred | quant_pred    # ensemble
+        elif mlp_pred is not None:
+            pred = mlp_pred
+        elif quant_pred is not None:
+            pred = quant_pred
+
         vx = torch.relu(k) ** 2     # xzl: vx sparse activation.
+
+        # simulate the pred ... 
+        if pred is not None:
+            vx = vx * pred
+
         v = matmul(vx, vw, vmx, vrx, vmy, vry)
 
         out = r * v
@@ -957,8 +1024,10 @@ class RWKV(MyModule):
         quant_pred = None
         quant_exec_start_t = time.time()
         if quant_weight is not None:
-            kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
-            kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit)
+            # wc: dequantized ahead of time
+            #kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
+            #kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit)
+            kw_nbit_dequant = quant_weight
             result = (kx @ kw_nbit_dequant).float()
             percent = self.quant_map[layer_id] # percentile, we use to take quant as activated
 
@@ -1127,8 +1196,9 @@ class RWKV(MyModule):
         quant_pred = None
         quant_exec_start_t = time.time()
         if quant_weight is not None:
-            kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
-            kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit)
+            #kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
+            #kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit)
+            kw_nbit_dequant = quant_weight
             result = (kx @ kw_nbit_dequant).float()
             percent = self.quant_map[layer_id] # percentile, we use to take quant as activated
 
@@ -1321,8 +1391,8 @@ class RWKV(MyModule):
         return x + out, xx
     
     # xzl: this 
-    @MyFunction
-    def ffn_seq(self, x, sx, ln_w, ln_b, k_mix, r_mix, kw, vw, rw, kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry):
+    def ffn_seq_dump(self, x, sx, ln_w, ln_b, k_mix, r_mix, kw, vw, rw, kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry,
+                     layer_id,):
         xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
         sx = torch.cat((sx.unsqueeze(0), xx[:-1,:]))
         kx = xx * k_mix + sx * (1 - k_mix)
@@ -1330,6 +1400,59 @@ class RWKV(MyModule):
 
         r = torch.sigmoid(matmul(rx, rw, rmx, rrx, rmy, rry))
         vx = torch.relu(matmul(kx, kw, kmx, krx, kmy, kry)) ** 2
+        out = r * matmul(vx, vw, vmx, vrx, vmy, vry)
+        return x + out, xx[-1,:], None
+
+    #@MyFunction
+    def ffn_seq(self, x, sx, ln_w, ln_b, k_mix, r_mix, kw, vw, rw, kmx, krx, kmy, kry, vmx, vrx, vmy, vry, rmx, rrx, rmy, rry,
+                layer_id,
+                mlp_weights = None,
+                quant_weight = None,
+                ):
+        xx = F.layer_norm(x, (x.shape[-1],), weight=ln_w, bias=ln_b)
+        sx = torch.cat((sx.unsqueeze(0), xx[:-1,:]))
+        kx = xx * k_mix + sx * (1 - k_mix)
+        rx = xx * r_mix + sx * (1 - r_mix)
+
+        r = torch.sigmoid(matmul(rx, rw, rmx, rrx, rmy, rry))
+
+        # sparsity
+        mlp_pred = None
+        if mlp_weights is not None:
+            thr = self.mlp_map[layer_id] # MLP threshold
+            mlpfc1, mlpfc2 = mlp_weights
+            mlp_pred = torch.relu(kx @ mlpfc1) @ mlpfc2  # logits
+            mlp_pred = torch.sigmoid(mlp_pred) 
+            mlp_pred = (mlp_pred > thr).int()
+
+        # --- quant pred, n bit    
+        quant_pred = None
+        if quant_weight is not None:
+            #kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
+            #kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit).to(kx.device)
+            kw_nbit_dequant = quant_weight
+            result = (kx @ kw_nbit_dequant).float()
+
+            percent = self.quant_map[layer_id] # percentile, we use to take quant as activated
+
+            # --- predict percentile as "activated"
+            percentile = torch.quantile(result, percent).item()
+            quant_pred = (result > percentile).int()
+
+        pred = None
+        if mlp_pred is not None and quant_pred is not None:
+            pred = mlp_pred | quant_pred    # ensemble
+        elif mlp_pred is not None:
+            pred = mlp_pred
+        elif quant_pred is not None:
+            pred = quant_pred
+
+        vx = torch.relu(matmul(kx, kw, kmx, krx, kmy, kry)) ** 2
+
+        # simulate the pred ...
+        if pred is not None:       # all layers sparse
+            vx = vx * pred
+
         out = r * matmul(vx, vw, vmx, vrx, vmy, vry)
         return x + out, xx[-1,:]
 
@@ -1401,8 +1524,9 @@ class RWKV(MyModule):
         quant_pred = None
         time_measure['quant_exec_start'] = time.time()
         if quant_weight is not None:
-            kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
-            kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit).to(kx.device)
+            #kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
+            #kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit).to(kx.device)
+            kw_nbit_dequant = quant_weight
             result = (kx @ kw_nbit_dequant).float()
 
             percent = self.quant_map[layer_id] # percentile, we use to take quant as activated
@@ -1517,8 +1641,9 @@ class RWKV(MyModule):
         quant_pred = None
         time_measure['quant_exec_start'] = time.time()
         if quant_weight is not None:
-            kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
-            kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit).to(kx.device)
+            #kw_nbit, scale_kw_nbit, zero_kw_nbit = quant_weight
+            #kw_nbit_dequant = dequantize(kw_nbit, scale_kw_nbit, zero_kw_nbit).to(kx.device)
+            kw_nbit_dequant = quant_weight
             result = (kx @ kw_nbit_dequant).float()
 
             percent = self.quant_map[layer_id] # percentile, we use to take quant as activated
@@ -2349,7 +2474,7 @@ class RWKV(MyModule):
         # "minK" has a high impact on speed... 
         # CLS, CLSPROBS = self.select_logits_jit(x1, minK=3, maxK=100, minProb=.95) # good
         CLS, CLSPROBS, CLS_OTHER, CLSPROBS_OTHER = \
-            self.select_logits_jit(x1, minK=3, maxK=100, minProb=.95) # good
+            self.select_logits_jit(x1, minK=3, maxK=100, minProb=0.95) # good
         # CLS, CLSPROBS = self.select_logits_jit(x1, minK=5, maxK=40, minProb=.5) 
         # CLS, CLSPROBS, CLS_OTHER, CLSPROBS_OTHER = \
         #     self.select_logits_jit(x1, minK=N, maxK=N, minProb=.5)  # seems quite good? (N=200
@@ -2725,7 +2850,11 @@ class RWKV(MyModule):
                         if cuda_applicable:
                             ATT = self.cuda_att_seq_v6_0
 
-                    FFN = self.ffn_seq
+                    if self.sparse_outpath is not None:
+                        FFN = self.ffn_seq_dump
+                    else:
+                        FFN = self.ffn_seq
+
                     if self.version >= 6.0:
                         FFN = self.ffn_seq_v6
                     elif self.version == 5.8:
@@ -2759,7 +2888,11 @@ class RWKV(MyModule):
                     elif self.version == 6.0:
                         ATT = self.att_one_v6_0
                     
-                    FFN = self.ffn_one
+                    if self.sparse_outpath is not None:
+                        FFN = self.ffn_one_dump
+                    else:
+                        FFN = self.ffn_one
+
                     if self.version >= 6.0:
                         FFN = self.ffn_one_v6
                     elif self.version == 5.8:
@@ -3068,7 +3201,8 @@ class RWKV(MyModule):
                             mlp_weights = None
 
                         if self.quant_bit is not None:
-                            quant_weight = w[f'{ffn}key.weight{self.quant_bit}b']
+                            # already dequantized
+                            quant_weight = w[f'{ffn}key.weight{self.quant_bit}b_deq']
                         else:
                             quant_weight = None
 
@@ -3138,7 +3272,8 @@ class RWKV(MyModule):
                             mlp_weights = None
 
                         if self.quant_bit is not None:
-                            quant_weight = w[f'{ffn}key.weight{self.quant_bit}b']
+                            # already dequantized
+                            quant_weight = w[f'{ffn}key.weight{self.quant_bit}b_deq']
                         else:
                             quant_weight = None
 
@@ -3158,15 +3293,43 @@ class RWKV(MyModule):
                             time_measure=time_measure,
                             )
                 elif self.version < 6.0:
-                    x, state[offset] = FFN(
-                        x, state[offset],
-                        w[f'{bbb}ln2.weight'], w[f'{bbb}ln2.bias'],
-                        w[f'{ffn}time_mix_k'], w[f'{ffn}time_mix_r'],
-                        kw, vw, rw,
-                        kmx, krx, kmy, kry,
-                        vmx, vrx, vmy, vry,
-                        rmx, rrx, rmy, rry,                    
-                        )    
+                    if self.sparse_outpath is not None:
+                        x, state[offset], sparse_tensor = FFN(
+                            x, state[offset],
+                            w[f'{bbb}ln2.weight'], w[f'{bbb}ln2.bias'],
+                            w[f'{ffn}time_mix_k'], w[f'{ffn}time_mix_r'],
+                            kw, vw, rw,
+                            kmx, krx, kmy, kry,
+                            vmx, vrx, vmy, vry,
+                            rmx, rrx, rmy, rry,
+                            i,
+                            )
+                        # save a tensofr for each layer:
+                        if sparse_tensor is not None:
+                            # only ffn_one will give NOT None
+                            sparse_tensor_list.append(sparse_tensor)
+                    else:
+                        if self.mlp_map is not None:
+                            mlp_weights = (w[f'{bbb}mlp.fc1.weight'], w[f'{bbb}mlp.fc2.weight'])
+                        else:
+                            mlp_weights = None
+
+                        if self.quant_bit is not None:
+                            quant_weight = w[f'{ffn}key.weight{self.quant_bit}b']
+                        else:
+                            quant_weight = None
+                        x, state[offset] = FFN(
+                            x, state[offset],
+                            w[f'{bbb}ln2.weight'], w[f'{bbb}ln2.bias'],
+                            w[f'{ffn}time_mix_k'], w[f'{ffn}time_mix_r'],
+                            kw, vw, rw,
+                            kmx, krx, kmy, kry,
+                            vmx, vrx, vmy, vry,
+                            rmx, rrx, rmy, rry,
+                            i,
+                            mlp_weights=mlp_weights,
+                            quant_weight=quant_weight,
+                            )    
                 else:
                     x, state[offset] = FFN(
                         x, state[offset],
@@ -3206,7 +3369,7 @@ class RWKV(MyModule):
             time_measure['cls_start'] = time.time()
             x = F.layer_norm(x, (args.n_embd,), weight=w['ln_out.weight'], bias=w['ln_out.bias'])
 
-            if 'head_l1.weight' in w: # use compressed cls heads
+            if 'head_l1.weight' in w and self.on_cluster_head: # use compressed cls heads
                 # version 0
                 # sample top1 cls. 
                 def _retrieve_value0(x, w):
