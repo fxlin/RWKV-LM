@@ -5,13 +5,7 @@
 # VRAM_MB, NGPUS, GPU0_NAME
 #   GPUID is a known valid GPU, for detecting VRAM size
 
-if [ $HOSTNAME = "xsel01" ]; then
-    NGPUS=1; GPUID=0
-elif [ $HOSTNAME = "xsel02" ]; then 
-    NGPUS=1; GPUID=0
-else
-    NGPUS=`nvidia-smi  --list-gpus |wc -l`; GPUID=0
-fi    
+NGPUS=`nvidia-smi  --list-gpus |wc -l`; GPUID=0
 
 VRAM_MB=`nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits --id=$GPUID`
 

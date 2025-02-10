@@ -2,12 +2,9 @@
 
 RWKVROOT=`readlink -f ../../`
 
-if [[ $HOSTNAME == *"xsel0"* ]]; then 
-    source $RWKVROOT/env-amd.sh
-elif [[ $HOSTNAME == *"udc-"* ]]; then 
-    source $RWKVROOT/env-rivanna.sh
-fi 
+export RWKVROOT
 
+source $RWKVROOT/env.sh
 source $RWKVROOT/gpu-detect.sh
 source model-config.sh
 
@@ -46,8 +43,7 @@ GPU_PER_NODE=$NGPUS
 # GPU_PER_NODE=8 
 # export CUDA_VISIBLE_DEVICES=1,2,3
 
-WANDB=rwkv-hpc
-# WANDB=
+WANDB=rwkv
 
 # set to 2 for consumer GPUs, set to 200 for A100 / H100 (affects speed & vram usage)
 if [[ $GPU0_NAME == *"A100"* ]]; then 
@@ -61,8 +57,6 @@ fi
 
 cd $RWKVROOT
 
-# for whatever reason, on RVA slurm `python3` may bind to python3.11 (why??
-# so force python3.10 here...
 python3.10 train.py --load_model "0" --wandb "$WANDB" --proj_dir $PROJ_DIR --my_testing $MODEL_TYPE \
  --my_pile_stage 3 --epoch_count 999999 --epoch_begin 0 \
  $DATAINFO \
