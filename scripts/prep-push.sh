@@ -30,6 +30,14 @@ rsync -av --delete \
     --exclude='*.a' \
     --exclude='.github' \
     --exclude='docs/archived' \
+    --exclude='lm-evaluation-harness' \
+    --exclude='*.pyc' \
+    --exclude='build/' \
+    --exclude='wandb/' \
+    --exclude='*.egg-info/' \
+    --exclude='*.egg' \
+    --exclude='' \
+    --exclude='lm-evaluation-harness' \
     --exclude='out/*' \
     --exclude='.gdb_history' \
     $EXCLUDES \
