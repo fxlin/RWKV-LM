@@ -288,7 +288,8 @@ if os.environ.get('RWKV_DML_ON') == '1':
 class RWKV(MyModule):
     def __init__(self, model, strategy, verbose = True, convert_and_save_and_exit = None,
                  sparse_outpath = None, quant_bit = None, quant_map = None, mlp_map = None,
-                 load_token_cls = None, on_cluster_head = False):
+                 load_token_cls = None, on_cluster_head = False
+                 , lazy_emb = False):
         super().__init__()
         if verbose:
             prxxx = lambda *args, **kwargs: print(*args, **kwargs)
@@ -310,8 +311,8 @@ class RWKV(MyModule):
         self.stat_time_ffn_kx_kw = 0.0
         self.stat_time_ffn_vx_vw = 0.0
 
-        self.lazy_emb = False
-        self.on_cluster_head = False
+        self.lazy_emb = lazy_emb
+        self.on_cluster_head = on_cluster_head
 
         self.sparse_outpath = sparse_outpath # collect sparse data inf FFN
 

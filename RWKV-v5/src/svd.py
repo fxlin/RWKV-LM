@@ -28,7 +28,7 @@ python3 src/svd.py --svdfac 8 --decompose 1 --decompose_ffn 1   \
 ##############
 # strip diag:
 python3 src/svd.py --decompose 3 \
-    --orig_model /sfs/weka/scratch/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-pretrain-x58/rwkv-410
+    --orig_model ~/RWKV-LM/RWKV-v5/out/01b-pretrain-x58/rwkv-410
 
 ##############
 # recover: 
@@ -37,11 +37,11 @@ python3 svd.py --decompose 0
 
 python3 svd.py \
     --decompose 0  \
-    --my_model /data/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/L24-D1024-F4-x052attDiag/rwkv-15
+    --my_model ~/RWKV-LM/RWKV-v5/out/L24-D1024-F4-x052attDiag/rwkv-15
 
 python3 svd.py \
     --decompose 0  \
-    --my_model /data/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/L24-D1024-F8-x052xzlTune/rwkv-90
+    --my_model ~/RWKV-LM/RWKV-v5/out/L24-D1024-F8-x052xzlTune/rwkv-90
         
 
 python3 svd.py \
@@ -55,11 +55,8 @@ python3 svd.py --decompose 2 --orig_model out/L12-D768-F4-x052xzlNoReLu/rwkv-60
 
 '''
 
-DEFAULT_ORIG = '/data/models/RWKV-5-World-0.4B-v2-20231113-ctx4096'
-# DEFAULT_MY = '/u/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/L24-D1024-F4-x052attTune/rwkv-0'
-# DEFAULT_MY = '/u/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/L24-D1024-F4-x052xzlTune/rwkv-10'
-# DEFAULT_MY = '/u/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/L24-D2048-F4-x052xzlNoReLu/rwkv-11'
-DEFAULT_MY = '/data/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/L24-D1024-F4-x052xzlTune/rwkv-16'
+DEFAULT_ORIG = None
+DEFAULT_MY = None
 
 # orig name: RWKV_v5_demo.py, inference code
 ########################################################################################################

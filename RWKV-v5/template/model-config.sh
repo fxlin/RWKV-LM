@@ -21,8 +21,8 @@ N_LAYER="32"; N_EMBD="2560"     # 3B
 SVDFAC="8"
 # SVDFAC="4"
 
-HEAD_K=0    # 0 for disabling cluster head
-# HEAD_K=200    # 0 for disabling cluster head
+#HEAD_K=0    # 0 for disabling cluster head
+HEAD_K=200    # 0 for disabling cluster head
 
 ##########################################################################
 # training data 

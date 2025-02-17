@@ -18,8 +18,8 @@ if os.environ.get('RWKV_CUDA_ON') != '0':
     os.environ["RWKV_CUDA_ON"] = '1' #default
 
 RWKV_HOME = os.environ.get("RWKV_HOME") # User specific. See env-amd.sh
-model_path=f'{RWKV_HOME}/RWKV-v5/out/04b-official-sparsity/04b-official'
-sparse_path=f'{RWKV_HOME}/RWKV-v5/out/04b-official-sparsity'
+model_path=f'{RWKV_HOME}/out/04b-x58/04b-x58'
+sparse_path=f'{RWKV_HOME}/out/04b-x58'
 
 COLLECT_SPARSITY_DATA = True
 print(f'Loading model - {model_path}')
@@ -28,7 +28,6 @@ def my_print(s):
     print(s, end='', flush=True)
 
 # xzl: for strategy, cf: https://pypi.org/project/rwkv/ for more ex
-#
 # Strategy Examples: (device = cpu/cuda/cuda:0/cuda:1/...)
 # 'cpu fp32' = all layers cpu fp32
 # 'cuda fp16' = all layers cuda fp16
