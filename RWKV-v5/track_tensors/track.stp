@@ -1,0 +1,107 @@
+// function get_storage_ptr:long (storage_:long) %{
+//     long *storage_ptr = (void *) STAP_ARG_storage_;  // Cast the argument to a pointer
+//     STAP_RETVALUE = (uint64_t) *(void **) storage_ptr;  // Correctly dereference it
+// %}
+// https://sourceware.org/systemtap/tapsets.pdf
+
+// Think about making a tapset
+// https://developers.redhat.com/articles/2024/09/23/making-systemtap-instrumentation-easier-tapsets#
+
+global output_file = "/tmp/input_tensor.txt"
+
+probe begin {
+    printf("Tracing matmul\n")
+}
+
+// c10/core/TensorImpl.h
+// Current breakdown:
+//
+//    vtable pointer
+//    strong refcount           TODO: pack these into one word
+//    weak refcount
+//    storage pointer
+//    autograd metadata pointer
+//    named tensor metadata pointer
+//    version counter pointer
+//    PyObjectSlot
+//    SizesAndStrides size/pointer
+//    SizesAndStrides sizes (pre-allocated 0)
+//    SizesAndStrides sizes (pre-allocated 1)
+//    SizesAndStrides sizes (pre-allocated 2)
+//    SizesAndStrides sizes (pre-allocated 3)
+//    SizesAndStrides sizes (pre-allocated 4)
+//    SizesAndStrides strides (pre-allocated 0)
+//    SizesAndStrides strides (pre-allocated 1)
+//    SizesAndStrides strides (pre-allocated 2)
+//    SizesAndStrides strides (pre-allocated 3)
+//    SizesAndStrides strides (pre-allocated 4)
+//    storage offset
+//    numel
+//    data type, device, is_contiguous, storage_access_should_throw_, bitfields
+//    DispatchKeySet
+
+
+probe process("/data/home/bfr4xr/miniconda3/envs/sparsity/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so").function("_ZN2at6native21structured_mm_out_cpu4implERKNS_6TensorES4_S4_") {
+
+    input_ptr = $self->impl_->target_
+    weight_ptr = $mat2->impl_->target_
+
+    //for (i = 0; i < 8; i++) {
+    //    val = @cast(impl_ptr + (i * 8), "uint64_t");
+    //    printf("offset 0x%x: %p\n", i * 8, val);
+    //}
+
+    storage_ptr = @cast(input_ptr + 0x10, "uint64_t")
+    sizes1 = @cast(input_ptr + 0x48, "uint64_t")
+    sizes2 = @cast(input_ptr + 0x50, "uint64_t")
+    numel = @cast(input_ptr + 0xa0, "uint64_t")
+    data_ptr = @cast(storage_ptr + 0x10, "uint64_t"); // Guess for data_ptr_ offset
+    
+    printf("Input tensor [%d, %d] numel: %d\n", sizes1, sizes2, numel)
+
+    storage_ptr = @cast(weight_ptr + 0x10, "uint64_t")
+    sizes1 = @cast(weight_ptr + 0x48, "uint64_t")
+    sizes2 = @cast(weight_ptr + 0x50, "uint64_t")
+    numel = @cast(weight_ptr + 0xa0, "uint64_t")
+    data_ptr = @cast(storage_ptr + 0x10, "uint64_t"); // Guess for data_ptr_ offset
+
+    printf("Weight tensor [%d, %d] numel: %d\n", sizes1, sizes2, numel)
+
+    // Write the tensors of interest to a file
+    //system(sprintf("echo '' > %s", output_file))
+    //system(sprintf("echo %d %d > %s", sizes1, sizes2, output_file))
+    //float_data = @cast(data_ptr, "float");
+    //for (i = 0; i < numel; i++) {
+    //    half_value = @cast(data_ptr + (i * 2), "uint16_t"); // 2-byte offset
+    //    printf("data[%d]: 0x%x", i, half_value);
+    //    system(sprintf("echo '0x%x' >> %s", half_value, output_file))
+    //    //int_value = @cast(data_ptr + (i * 4), "uint32_t"); // Raw bits
+    //    //printf("data[%d]: %s\n", i, fp_to_string(float_value, 5));
+    //    #, float_data[i])
+    //}
+
+}
+
+//probe process("/data/home/bfr4xr/miniconda3/envs/sparsity/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so").function("*matmul*") {
+//    printf("Matmul variant %s called\n", ppfunc())
+//}
+
+probe process("/data/home/bfr4xr/miniconda3/envs/sparsity/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so").function("_ZN2at4_ops6matmul4callERKNS_6TensorES4_") {
+    printf("Matmul variant %s called\n", ppfunc())
+}
+
+probe process("/data/home/bfr4xr/miniconda3/envs/sparsity/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so").function("mkl_blas_sgemm") {
+    printf("mkl_blas_sgemm called\n")
+}
+
+probe process("/data/home/bfr4xr/miniconda3/envs/sparsity/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so").function("sgemm_") {
+    printf("sgemm__")
+}
+
+//probe process("/data/home/bfr4xr/miniconda3/envs/sparsity/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so").function("_ZN2at6native7cpublas9gemm_stubE") {
+//    printf("CBLAS %s called\n", ppfunc())
+//}
+
+probe end {
+    printf("Tracing finished\n")
+}

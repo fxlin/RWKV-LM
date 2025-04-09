@@ -276,6 +276,7 @@ if os.environ.get('RWKV_CUDA_ON') == '1' and not DISABLE_CUBLAS_GEMM:
 
 else:       # xzl: generic BLAS, slow path
     def matmul_float(a, b, output_dtype: Optional[torch.dtype]=None):
+        print("matmult")
         return (a @ b).to(output_dtype)
 
 # xzl: pytorch on MSFT directX...
@@ -1447,12 +1448,14 @@ class RWKV(MyModule):
         elif quant_pred is not None:
             pred = quant_pred
 
+        print("kx")
         vx = torch.relu(matmul(kx, kw, kmx, krx, kmy, kry)) ** 2
 
         # simulate the pred ...
         if pred is not None:       # all layers sparse
             vx = vx * pred
 
+        print("vx")
         out = r * matmul(vx, vw, vmx, vrx, vmy, vry)
         return x + out, xx[-1,:]
 
@@ -1974,12 +1977,19 @@ class RWKV(MyModule):
         w = w[:, :-T].reshape(-1, T, 2 * T - 1)
         w = w[:, :, T-1:].reshape(H, T, T)
 
+        print("att_seq_v5")
+
+        print("r")
         r = matmul(rx, rw, rmx, rrx, rmy, rry, output_dtype=torch.float32).view(T, H, N).transpose(0, 1)
+        print("k")
         k = matmul(kx, kw, kmx, krx, kmy, kry, output_dtype=torch.float32).view(T, H, N).permute(1, 2, 0)
+        print("v")
         v = matmul(vx, vw, vmx, vrx, vmy, vry, output_dtype=torch.float32).view(T, H, N).transpose(0, 1)
 
         out = ((r @ k) * w) @ v + (r @ s) * wb
+        print("??")
         s = ws * s + (k * wk) @ v
+        print("??")
         
         out = out.transpose(0, 1).contiguous().reshape(T, H*N)
         out = F.group_norm(out, num_groups=H, weight=lx_w, bias=lx_b, eps = 64e-5)
@@ -2816,7 +2826,8 @@ class RWKV(MyModule):
             ##### xzl: below- assemble & run layers (each layer)
             #  use custom cuda impl if available, otherwise fall back to torch
             sparse_tensor_list = [] # this contains sparse tensors for each layer
-            for i in range(args.n_layer):
+            #for i in range(args.n_layer):
+            for i in range(1):
                 bbb = f'blocks.{i}.'
                 att = f'blocks.{i}.att.'
                 ffn = f'blocks.{i}.ffn.'
