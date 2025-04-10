@@ -391,22 +391,31 @@ if __name__ == "__main__":
         # ^^ trainer.strategy also constructed
 
     # xzl after loading model, print out info:  layers, params shapes, etc. 
+    #if trainer.global_rank == 0:
+    #    print("Dump model arch ....")
+    #    for n in model.state_dict():            # xzl: n: para name, can be used as key        cf https://pytorch.org/tutorials/recipes/recipes/what_is_state_dict.html             
+    #        # if "blocks." in n and not "blocks.0." in n: 
+    #        if not "blocks.0." in n: # only print params in "blocks"
+    #            continue # xzl: only print layer0, less cluter ....            
+    #        shape = model.state_dict()[n].shape
+    #        shape = [i for i in shape if i != 1]
+    #        if len(shape) > 2:
+    #            print(f"{str(shape[0]).ljust(5)} {str(shape[1]).ljust(5)} {str(shape[2]).ljust(5)} {n}")
+    #        elif len(shape) > 1:
+    #            print(f"{str(shape[0]).ljust(5)} {str(shape[1]).ljust(5)}       {n}")
+    #        elif len(shape) > 0:
+    #            print(f"{str(shape[0]).ljust(5)}             {n}")
+    #            # print(f"{str(shape).ljust(5)}             {n}")
+    #    print("(Omit other layers...")
     if trainer.global_rank == 0:
         print("Dump model arch ....")
-        for n in model.state_dict():            # xzl: n: para name, can be used as key        cf https://pytorch.org/tutorials/recipes/recipes/what_is_state_dict.html             
-            # if "blocks." in n and not "blocks.0." in n: 
-            if not "blocks.0." in n: # only print params in "blocks"
-                continue # xzl: only print layer0, less cluter ....            
+        for n in model.state_dict():
             shape = model.state_dict()[n].shape
-            shape = [i for i in shape if i != 1]
-            if len(shape) > 2:
-                print(f"{str(shape[0]).ljust(5)} {str(shape[1]).ljust(5)} {str(shape[2]).ljust(5)} {n}")
-            elif len(shape) > 1:
-                print(f"{str(shape[0]).ljust(5)} {str(shape[1]).ljust(5)}       {n}")
-            elif len(shape) > 0:
-                print(f"{str(shape[0]).ljust(5)}             {n}")
-                # print(f"{str(shape).ljust(5)}             {n}")
-        print("(Omit other layers...")
+            s0 = str(shape[0]) if len(shape) > 0 else ""
+            s1 = str(shape[1]) if len(shape) > 1 else ""
+            s2 = str(shape[2]) if len(shape) > 2 else ""
+            s3 = str(shape[3]) if len(shape) > 3 else ""
+            print(f"{s0.ljust(5)} {s1.ljust(5)} {s2.ljust(5)} {s3.ljust(5)} {n}")
     if "deepspeed" in args.strategy:
         trainer.strategy.config["zero_optimization"]["allgather_bucket_size"] = args.ds_bucket_mb * 1000 * 1000
         trainer.strategy.config["zero_optimization"]["reduce_bucket_size"] = args.ds_bucket_mb * 1000 * 1000

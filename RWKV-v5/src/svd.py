@@ -168,6 +168,7 @@ def strip_diag(args):
 
 def full_to_svd(w,args):
     selfkeys = [".att.receptance.", ".att.key.", ".att.value.", ".att.gate."]
+    selfkeys = [".att.receptance.", ".att.key.", ".att.value."]
     if args.decompose_ffn == 1: 
         selfkeys += [".ffn.receptance."]
 
@@ -181,8 +182,8 @@ def full_to_svd(w,args):
         if '.time_faaaa' in k: w[k] = w[k].unsqueeze(-1)
     '''
 
-    self_n_head = w['blocks.0.att.time_decay'].shape[0]
-    self_head_size = w['blocks.0.ln1.weight'].shape[0] // self_n_head
+    #self_n_head = w['blocks.0.att.time_decay'].shape[0]
+    #self_head_size = w['blocks.0.ln1.weight'].shape[0] // self_n_head
     # self_rank = args.n_embd // args.svdfac 
 
     neweight = w.copy()
@@ -255,8 +256,8 @@ def svd_recover_to_full(w, args):
         # print(k)  #  also print para names on the way...
         w[k] = w[k].float() # convert to f32 type for compute
 
-    self_n_head = w['blocks.0.att.time_decay'].shape[0]
-    self_head_size = w['blocks.0.ln1.weight'].shape[0] // self_n_head
+    #self_n_head = w['blocks.0.att.time_decay'].shape[0]
+    #self_head_size = w['blocks.0.ln1.weight'].shape[0] // self_n_head
     # self_rank = args.n_embd // args.svdfac 
 
     if 'blocks.0.att.key_diag' in w:
@@ -265,6 +266,7 @@ def svd_recover_to_full(w, args):
         has_diag = False
 
     shortkeys = ["receptance", "key", "value", "gate"]
+    shortkeys = ["receptance", "key", "value"] # x070's gate is already LoRA
     for i in range(args.n_layer):
         for kk in shortkeys:        
             if i ==0: #info onlyl
@@ -413,7 +415,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # initialization
-    args.n_layer = 0
+    args.n_layer = 24
     args.n_embd = 0
     args.vocab_size = 65536
     args.convert = 1

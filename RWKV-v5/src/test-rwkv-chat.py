@@ -25,6 +25,8 @@ if os.environ.get("RWKV_JIT_ON") != '0':
 if os.environ.get('RWKV_CUDA_ON') != '0':
     os.environ["RWKV_CUDA_ON"] = '1' #default
 
+os.environ["RWKV_V7_ON"] = '1' # enable v7
+
 from rwkv.model import RWKV
 from rwkv.utils import PIPELINE, PIPELINE_ARGS, print_memory_usage
 from rwkv.arm_plat import is_amd_cpu
@@ -82,6 +84,9 @@ model_path='/data/models/pi-deployment/1b5-pre-x59-929'
 #   very bad
 # model_path='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/run4-KL-loss-MLP/rwkv-40'
 
+# Test v7
+model_path = "/p/alpha/models/rwkv-v7/rwkv-v7-0.4B-svd-F8"
+
 
 print(f'Loading model - {model_path}')
 
@@ -119,10 +124,12 @@ if False:
 
 print_memory_usage("before model build")
 
+
 t0 = time.time()
 model = RWKV(model=model_path, 
-             strategy=strategy, 
-             verbose=True)
+             strategy=strategy,
+             version='x078')
+             #verbose=True)
 #              head_K=200, load_token_cls='/data/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-cls-mine/from-hpc/rwkv-823-cls.npy')
 
 print_memory_usage("before pipeline build")
@@ -144,8 +151,8 @@ def my_print(s):
     global cnt
     cnt += 1
     print(s, end='', flush=True)
-    if cnt % 50 == 0:
-        print_memory_usage("\n")
+    #if cnt % 50 == 0:
+    #    print_memory_usage("\n")
 
 t1 = time.time()
 
@@ -160,7 +167,7 @@ args = PIPELINE_ARGS(temperature = 1.0, top_p = 0.7, top_k = 100, # top_k = 0 th
                      token_stop = [], # stop generation whenever you see any token here
                      chunk_len = 256) # split input into chunks to save VRAM (shorter -> slower)
 
-print_memory_usage("before generate")
+#print_memory_usage("before generate")
 
 TOKEN_CNT = 100 
 pipeline.generate(ctx, token_count=TOKEN_CNT, args=args, callback=my_print)
@@ -170,10 +177,10 @@ t2 = time.time()
 
 print(f"model build: {(t1-t0):.2f} sec, exec {TOKEN_CNT} tokens in {(t2-t1):.2f} sec, {TOKEN_CNT/(t2-t1):.2f} tok/sec")
 
-if model.stat_runs != 0:
-    print(f"stats: runs: {model.stat_runs} \
-        cls/run {model.stat_loaded_cls/model.stat_runs:.2f} \
-        tokens/run {model.stat_loaded_tokens/model.stat_runs/65535:.2f}")
+#if model.stat_runs != 0:
+#    print(f"stats: runs: {model.stat_runs} \
+#        cls/run {model.stat_loaded_cls/model.stat_runs:.2f} \
+#        tokens/run {model.stat_loaded_tokens/model.stat_runs/65535:.2f}")
       
 '''
 # xzl: what are thsse for??? demo cut a long prompt into pieces and feed??
