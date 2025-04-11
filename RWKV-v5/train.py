@@ -376,8 +376,7 @@ if __name__ == "__main__":
             load_dict[k] = ww  #save it 
     
     # below: load from state_dict (tensors) to model 
-    # model.load_state_dict(load_dict, strict=False)
-    model.load_state_dict(load_dict, strict=True)
+    model.load_state_dict(load_dict, strict=False)
 
     if pl.__version__[0]=='2':
         trainer = Trainer(accelerator=args.accelerator,strategy=args.strategy,devices=args.devices,num_nodes=args.num_nodes,precision=args.precision,
