@@ -6,6 +6,7 @@ import os,sys
 import run_lm_eval
 
 # os.environ["RWKV_CUDA_ON"] = '0'   # for x58, x59, we dont have cuda custom ops
+os.environ["RWKV_V7_ON"] = '1' # enable v7
 
 # rva
 #v5.1

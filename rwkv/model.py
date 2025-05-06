@@ -341,6 +341,8 @@ if os.environ.get('RWKV_V7_ON') == '1':
             self.args = args
             args.MODEL_NAME = model
             self.version = version
+            if os.environ.get('RWKV_MY_TESTING') == 'x078':
+                self.version = "x078"
 
             print(f'Loading {model} ({strategy})\n')
 
