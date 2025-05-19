@@ -13,6 +13,8 @@ if os.environ.get("RWKV_JIT_ON") != '0':
 if os.environ.get('RWKV_CUDA_ON') != '0':
     os.environ["RWKV_CUDA_ON"] = '1' #default
 
+os.environ["RWKV_V7_ON"] = '1' # enable v7
+
 from rwkv.model import RWKV
 from rwkv.utils import PIPELINE, PIPELINE_ARGS, print_memory_usage
 from rwkv.arm_plat import is_amd_cpu
