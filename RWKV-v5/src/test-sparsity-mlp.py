@@ -17,7 +17,6 @@ args = parser.parse_args()
 in_model_file=None
 # .1b
 # outpath='/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-pre-x59-SPARSITY-EXP'
-NLAYERS=12
 
 # .4b
 # outpath='/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/04b-pre-x59-SPARSITY-EXP'
@@ -33,6 +32,13 @@ NLAYERS=12
 #out_model_file = f'{outpath}/rwkv-385-mlp.pth'
 # in_model_file = '/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/04b-pre-x59-SPARSITY-EXP/rwkv-860.pth'
 # out_model_file = '/home/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/04b-pre-x59-SPARSITY-EXP/rwkv-860-mlp.pth'
+
+# 3B
+in_model_file = '/data/models/3B-official-sparsity/3B-official.pth'
+out_model_file = '/data/models/3B-official-sparsity/3B-official-mlp.pth'
+outpath = '/data/models/3B-official-sparsity/'
+
+NLAYERS=32
 
 ###############################################
 TEST_LAYERS = range(0, NLAYERS)

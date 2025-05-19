@@ -45,6 +45,8 @@ from torch.nn import functional as F
 # xzl: use our own version of lm_eval, rwkv
 sys.path.append('/home/xl6yq/workspace-rwkv/RWKV-LM')
 
+#os.environ["RWKV_V7_ON"] = '1' # enable v7
+#os.environ["RWKV_MY_TESTING"] = "x078"
 os.environ["RWKV_JIT_ON"] = '1'
 RWKV_HOME = os.environ.get('RWKV_HOME')
 
@@ -145,7 +147,9 @@ from lm_eval.api.model import TemplateLM
 MODEL_NAME=f'{RWKV_HOME}/RWKV-v5/out/04b-pre-x59-8x-sparsity/rwkv-2405-mlp'
 MODEL_NAME=f'{RWKV_HOME}/RWKV-v5/out/04b-pre-x59-8x-sparsity/rwkv-2405-mlp'
 MODEL_NAME=f'/data/models/orin-deployment/04b-x59'
-MODEL_NAME=f'/data/models/orin-deployment/01b-x59'
+MODEL_NAME=f'/data/models/3b-svd.pth'
+MODEL_NAME=f'/data/models/RWKV-5-World-3B-v2-20231113-ctx4096.pth'
+MODEL_NAME=f'/data/models/3B-official-sparsity/3B-official-mlp.pth'
 #MODEL_NAME=f'{RWKV_HOME}/RWKV-v5/out/01b-pre-x59-8x-sparsity/rwkv-1857-mlp'
 
 # 1B5 -- official
@@ -218,14 +222,14 @@ MODEL_NAME=f'/data/models/orin-deployment/01b-x59'
 
 eval_tasks = [
         'lambada_openai',  # 5k tests
-        # 'lambada_standard',
-        # 'piqa',
-        # 'hellaswag',
-        # 'winogrande',       # 2k tests, fast
-        # 'arc_easy',
-        # 'arc_challenge',
-        # 'openbookqa',
-        # 'sciq',
+         #'lambada_standard',
+         #'piqa',
+         #'hellaswag',
+         #'winogrande',       # 2k tests, fast
+         #'arc_easy',
+         #'arc_challenge',
+         #'openbookqa',
+         #'sciq',
         #'leaderboard_ifeval',
         #'leaderboard_mmlu_pro',
         #'leaderboard_musr_murder_mysteries',
@@ -409,11 +413,12 @@ def do_eval(model_path, isverbose=False, benchmarks=[]):
     print(f'Loading model - {model_path}')
 
     quant_bit = 1
-    quant_map = [0.95, 0.95, 0.95, 0.95, 0.95] + [0.85] * 5 + [0.8] * 14
-    mlp_map = [0.7] * 24
+    quant_map = [0.95, 0.95, 0.95, 0.95, 0.95] + [0.85] * 5 + [0.8] * 22
+    mlp_map = [0.5] * 32
 
     # 8/26/24: using fp16 will make some benchmarks (eg openai) nan... so use fp32
-    model = RWKV(model=model_path, strategy='cuda fp16', verbose=isverbose,
+    #model = RWKV(model=model_path[:-4], strategy='cuda fp16')
+    model = RWKV(model=model_path, strategy='cuda fp16',
                  quant_bit=quant_bit, quant_map=quant_map, mlp_map=mlp_map)
     # model = RWKV(model=model_path, strategy='cuda fp32', verbose=isverbose)    # nneded for cls
     pipeline = PIPELINE(model, "rwkv_vocab_v20230424")
@@ -432,11 +437,11 @@ def do_eval(model_path, isverbose=False, benchmarks=[]):
     # {'results': {'hellaswag': {'acc': 0.2921728739294961, 'acc_stderr': 0.004538319464111977, 'acc_norm': 0.31955785700059747, 'acc_norm_stderr': 0.0046535230383693855}}, 'versions': {'hellaswag': 0}}
     # print(results['results'])
 
-    if model.stat_runs != 0: 
-        print(model.stat_runs)
-        print(f"stats: runs: {model.stat_runs} \
-        cls/run {model.stat_loaded_cls/model.stat_runs:.2f} \
-        tokens/run {model.stat_loaded_tokens/model.stat_runs/65535:.2f}")
+    #if model.stat_runs != 0: 
+    #    print(model.stat_runs)
+    #    print(f"stats: runs: {model.stat_runs} \
+    #    cls/run {model.stat_loaded_cls/model.stat_runs:.2f} \
+    #    tokens/run {model.stat_loaded_tokens/model.stat_runs/65535:.2f}")
     
     return results['results']
 

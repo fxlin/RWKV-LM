@@ -5,7 +5,8 @@
 import os,sys
 import run_lm_eval
 
-# os.environ["RWKV_CUDA_ON"] = '0'   # for x58, x59, we dont have cuda custom ops
+#os.environ["RWKV_CUDA_ON"] = '0'   # for x58, x59, we dont have cuda custom ops
+os.environ["RWKV_V7_ON"] = '1' # enable v7
 
 # rva
 #v5.1
@@ -26,6 +27,8 @@ path='/scratch/xl6yq/data/models/RWKV-5-World-0.1B-v1-20230803-ctx4096'
 # # path='/data/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-pretrain-x58/from-hpc/rwkv-270-nodiag'
 # # path='/data/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-pretrain-x58/from-hpc/rwkv-295-nodiag'
 # path='/sfs/weka/scratch/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/01b-pretrain-x58/rwkv-410-nodiag'
+
+path='/data/models/0.1B-x070-vanilla.pth'
 
 # path='/data/xl6yq/workspace-rwkv/RWKV-LM/RWKV-v5/out/L12-D768-F4-x052xzlNoReLu-cls/rwkv-66'
 

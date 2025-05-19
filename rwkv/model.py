@@ -341,6 +341,8 @@ if os.environ.get('RWKV_V7_ON') == '1':
             self.args = args
             args.MODEL_NAME = model
             self.version = version
+            if os.environ.get('RWKV_MY_TESTING') == 'x078':
+                self.version = "x078"
 
             print(f'Loading {model} ({strategy})\n')
 
@@ -555,7 +557,8 @@ if os.environ.get('RWKV_V7_ON') == '1':
         @MyStatic
         def RWKV_x070_TMix_seq(layer_id: int, H:int, N:int, x, x_prev, v_first, state, x_r, x_w, x_k, x_v, x_a, x_g, w0, w1, w2, a0, a1, a2, v0, v1, v2, g1, g2, k_k, k_a, r_k, R_, K_, V_, O_, ln_w, ln_b):
             T = x.shape[0]
-            xx = torch.cat((x_prev.unsqueeze(0), x[:-1,:])) - x
+            xx = torch.cat((x_prev.unsqueeze(0), x[:-1,:]))
+            xx = xx - x
             xr, xw, xk, xv, xa, xg = x+xx*x_r, x+xx*x_w, x+xx*x_k, x+xx*x_v, x+xx*x_a, x+xx*x_g
 
             r = xr @ R_
@@ -3723,7 +3726,7 @@ class RWKV(MyModule):
                             mlp_weights = None
 
                         if self.quant_bit is not None:
-                            quant_weight = w[f'{ffn}key.weight{self.quant_bit}b']
+                            quant_weight = w[f'{ffn}key.weight{self.quant_bit}b_deq']
                         else:
                             quant_weight = None
                         x, state[offset] = FFN(
