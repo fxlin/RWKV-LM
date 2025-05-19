@@ -7,7 +7,7 @@
 #export CUDA_VISIBLE_DEVICES=0
 
 if [[ $USER == "bfr4xr" ]]; then
-    conda activate rwkv
+    source /home/bfr4xr/miniconda3/bin/activate rwkv
     RWKV_HOME=/home/bfr4xr/RWKV-LM
 elif [[ $USER == "xl6yq" ]]; then
     source /home/xl6yq/workspace-rwkv/venv/bin/activate

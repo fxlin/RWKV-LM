@@ -18,8 +18,11 @@ if os.environ.get('RWKV_CUDA_ON') != '0':
     os.environ["RWKV_CUDA_ON"] = '1' #default
 
 RWKV_HOME = os.environ.get("RWKV_HOME") # User specific. See env-amd.sh
-model_path=f'{RWKV_HOME}/RWKV-v5/out/04b-official-sparsity/04b-official'
-sparse_path=f'{RWKV_HOME}/RWKV-v5/out/04b-official-sparsity'
+#model_path=f'{RWKV_HOME}/RWKV-v5/out/04b-official-sparsity/04b-official'
+#sparse_path=f'{RWKV_HOME}/RWKV-v5/out/04b-official-sparsity'
+
+model_path=f'/data/models/3B-x58-sparsity/3B-x58'
+sparse_path=f'/data/models/3B-x'
 
 COLLECT_SPARSITY_DATA = True
 print(f'Loading model - {model_path}')
