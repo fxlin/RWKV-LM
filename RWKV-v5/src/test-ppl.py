@@ -29,7 +29,6 @@ torch.backends.cudnn.allow_tf32 = True
 torch.backends.cuda.matmul.allow_tf32 = True
 from torch.nn import functional as F
 
-# xzl: use our own version of lm_eval, rwkv (update: do it in env-XXX.sh)
 # sys.path.append('/home/xl6yq/workspace-rwkv/RWKV-LM')
 
 os.environ["RWKV_JIT_ON"] = '1'
@@ -64,7 +63,6 @@ MODEL_NAME = '/data/models/01b-pre-x59-CLS-TEST'
 eval_tasks = ['lambada_openai']
 ########################################################################################################
 
-# xzl: cached logits, cache outcome "True/False"
 #       key: textual string
 logitBuf = {}
 correctBuf = {}
@@ -87,18 +85,11 @@ class EvalHarnessAdapter(TemplateLM):
         self.pretrained = pretrained
         self.tokenizer = TokenizerWrapper(pipeline.tokenizer)
 
-    # xzl: implement the request type "loglikelihood"....
     def _loglikelihood_tokens(self, requests, disable_tqdm=False):
         global logitBuf, correctBuf
 
         res = []
 
-        # xzl: invoke forward() for each "request"... 
-        # a request - a text sequent (like prompt?). eg openai benchmark has 
-        # ~5K requests
-        #
-        # below UNLIKE test-rwkv.chat.py: NOT using pipeline args for logits sampling 
-        #   just treat it as greedy decoder, for next token predict???
         for COUNTER in range(len(requests)):
             n = COUNTER
             raw_src = requests[n][0][0] + requests[n][0][1]
@@ -108,26 +99,22 @@ class EvalHarnessAdapter(TemplateLM):
             raw_src = '\n' + raw_src
             src = self.pad + src
 
-            sss = str(src)      # xzl: "src" entire sentence 
+            sss = str(src)      
             correct = True
-            # xzl cache... 
             if sss in logitBuf: # sss: a prompt processed before (cached
-                logit = logitBuf[sss]       # xzl: logit for the "next token" of sss
-                correct = correctBuf[sss]  # xzl: True/False for next token prediction of sss
+                logit = logitBuf[sss] 
+                correct = correctBuf[sss] 
             else:
-                q_len = len(requests[n][1]) # xzl: q_len: prompt length (??) - out of the entire sentence
+                q_len = len(requests[n][1])
                 q_len += len(self.pad)
                 logit = 0
                 
                 with torch.no_grad():
                     print("*",end='',flush=True)   # show progress....
-                    # xzl: below forward. send one seq to the model (i.e. shape bsz=1,L,D)
                     outputs, _, _ = self.pretrained.forward(src, None, full_output=True)
-                    # breakpoint()
-                    # xzl: for each token to be predicted... (q_len: prompt length?)
                     for i in range(q_len-1, len(src)-1):
                         oo = outputs[i].detach().float()
-                        dst = src[i+1]  # xzl: next token, from GT
+                        dst = src[i+1] 
                         v = F.softmax(oo, dim=-1)[dst]
 
                         print(f"\nSeq length: {len(outputs)}")
@@ -158,20 +145,18 @@ class EvalHarnessAdapter(TemplateLM):
                                     ppl is affected by other probs...
                         """
 
-                        # xzl: logit for the GT token. and accmulate over all preidcted tokens
-                        #       for this generation process (a 'reqesut') 
                         logit += math.log(v)    
                         _, s_index = torch.sort(oo, descending=True)
-                        pred = s_index[0].item()   # xzl: pred token with higehst prob...
+                        pred = s_index[0].item() 
                         if pred != dst:
-                            correct = False     # xzl: if one token is wrong, the entire prediction is wrong
+                            correct = False    
                     outputs = None
                     pred = None
-                logitBuf[sss] = logit  # xzl: cache (sumed) logits for this prompt
-                correctBuf[sss] = correct   # xzl: cache yes/no for this prompt
+                logitBuf[sss] = logit
+                correctBuf[sss] = correct   
                 #clean_cache()
             
-            res += [(logit, correct)]   # xzl: return summed logit
+            res += [(logit, correct)] 
             if n % 1000 == 0:
                 print(f'{n//1000}K/{len(requests)//1000}K', end = ' ', flush=True)
         return res

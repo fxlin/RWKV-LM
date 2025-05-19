@@ -13,7 +13,6 @@ typedef at::BFloat16 bf16;
 
 // Helper function to retrieve the `MTLBuffer` from a `torch::Tensor`.
 static inline id<MTLBuffer> getMTLBufferStorage(const torch::Tensor& tensor) {
-    // xzl: cast pointer only? 
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
 }
 
@@ -33,7 +32,6 @@ void forward(
 
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
         NSError *error = nil;
-        // xzl: below, 1st argument name omitted
         NSString * src = [NSString stringWithContentsOfFile:sourcePath encoding:NSUTF8StringEncoding error:&error]; 
         if (error) printf("%s: error: %s\n", __func__, [[error description] UTF8String]);
 
@@ -56,7 +54,6 @@ void forward(
         // Get a reference to the dispatch queue for the MPS stream, which encodes the synchronization with the CPU.
         dispatch_queue_t myQueue = torch::mps::get_dispatch_queue();
 
-        // xzl 
         dispatch_sync(myQueue, ^(){
             id<MTLComputeCommandEncoder> enc = [cmdbuf computeCommandEncoder];
             TORCH_CHECK(enc, "enc");
@@ -178,8 +175,6 @@ void metal_backward(
     }
 }
 
-// Create Python bindings for the Objective-C++ code.
-// xzl ... so that python can find these funcs in "compiled" metal
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("forward", &metal_forward);
     m.def("backward", &metal_backward);

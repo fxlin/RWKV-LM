@@ -22,7 +22,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_type", default="", type=str) # ""/"states"
 
     parser.add_argument("--data_file", default="", type=str)
-    parser.add_argument("--data_type", default="utf-8", type=str)   # xzl: binidx by default. "uint16" why special
+    parser.add_argument("--data_type", default="utf-8", type=str)   # binidx by default. "uint16" why special
     parser.add_argument("--vocab_size", default=0, type=int)  # vocab_size = 0 means auto (for char-level LM and .txt data)
 
     parser.add_argument("--ctx_len", default=1024, type=int)
@@ -36,10 +36,9 @@ if __name__ == "__main__":
     parser.add_argument("--n_embd", default=512, type=int)
     parser.add_argument("--dim_att", default=0, type=int)
     parser.add_argument("--dim_ffn", default=0, type=int)
-    parser.add_argument("--pre_ffn", default=0, type=int)  # replace first att layer by ffn (sometimes better)      xzl: dark trick...
-    parser.add_argument("--head_qk", default=0, type=int)  # my headQK trick        xzl:cf REAMDE
+    parser.add_argument("--pre_ffn", default=0, type=int)  # replace first att layer by ffn (sometimes better) 
+    parser.add_argument("--head_qk", default=0, type=int)  # my headQK trick
     parser.add_argument("--tiny_att_dim", default=0, type=int)  # tiny attention dim
-    # xzl: can "shrink" att dim at specified layers... (cf model.py) not used in train script
     parser.add_argument("--tiny_att_layer", default=-999, type=int)  # tiny attention @ which layer         
 
     parser.add_argument("--lr_init", default=6e-4, type=float)  # 6e-4 for L12-D768, 4e-4 for L24-D1024, 3e-4 for L24-D2048
@@ -53,7 +52,6 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", default=0, type=float) # try 0.1 / 0.01 / 0.001
     parser.add_argument("--weight_decay_final", default=-1, type=float)
 
-    # xzl: means what
     # pile mode -- stages of training? 1-init? >2 find saved model?
     parser.add_argument("--my_pile_version", default=1, type=int)  # my special pile version
     parser.add_argument("--my_pile_stage", default=0, type=int)  # my special pile mode
@@ -71,18 +69,17 @@ if __name__ == "__main__":
     parser.add_argument("--my_pos_emb", default=0, type=int)
     parser.add_argument("--load_partial", default=0, type=int)
     parser.add_argument("--magic_prime", default=0, type=int)
-    parser.add_argument("--my_qa_mask", default=0, type=int)    # xzl: qa task only??
+    parser.add_argument("--my_qa_mask", default=0, type=int)    
     parser.add_argument("--my_random_steps", default=0, type=int)
-    parser.add_argument("--my_testing", default='x052', type=str) # xzl:???  also  "x060" "g"?
+    parser.add_argument("--my_testing", default='x052', type=str) 
     parser.add_argument("--my_exit", default=99999999, type=int)
     parser.add_argument("--my_exit_tokens", default=0, type=int)
 
-    # xzl add 
     parser.add_argument("--svdfac", default=1, type=int) 
     parser.add_argument("--finetune", default=0, type=int)  # only finetune specific paras, freezing others
     parser.add_argument("--NoReLu", default=0, type=int) # use relu between decomposed weights?
     parser.add_argument("--NoDiag", default=1, type=int) # add diag to the weights? 
-    parser.add_argument("--head_K", default=0, type=int)  # xzl: compress cls head as K clusters
+    parser.add_argument("--head_K", default=0, type=int)  
     parser.add_argument("--load_token_cls", default="", type=str)  # token clusters, *.npy
     parser.add_argument("--lm_eval_0", default=1, type=int)  # run lm_eval before training/tuning starts, ensures lm_eval works 
     parser.add_argument("--lm_eval_n", default=1, type=int)  # run lm_eval on every chkpt we save
@@ -117,7 +114,6 @@ if __name__ == "__main__":
     warnings.filterwarnings("ignore", ".*The progress bar already tracks a metric with the*")
     # os.environ["WDS_SHOW_SEED"] = "1"
 
-    # xzl: override bsz based on gpu vram, model arch, and finetune or not 
     # e.g. [2,6,8,10] are micro_bsz for VRAM of ~12GB, ~24GB, ~40GB, ~80GB
     bsztable = {
         "L32-D2560-ctx2048-pretrain": [1,1,2,3],      # 3B OOM: bsz=4 for A100 80GB...
@@ -158,7 +154,7 @@ if __name__ == "__main__":
     os.environ["RWKV_HEAD_SIZE_A"] = str(args.head_size_a)
     os.environ["RWKV_TRAIN_TYPE"] = args.train_type
     if args.dim_att <= 0:
-        args.dim_att = args.n_embd      # xzl: default attn dim ... same as embedding 
+        args.dim_att = args.n_embd      
     if args.dim_ffn <= 0:
         if '-f4' in os.environ["RWKV_MY_TESTING"]:
             args.dim_ffn = int((args.n_embd * 4) // 32 * 32)
@@ -170,7 +166,6 @@ if __name__ == "__main__":
         args.proj_dir = f"{args.proj_dir}-{args.run_name}"
     else:
         # args.run_name = f"{args.vocab_size} ctx{args.ctx_len} L{args.n_layer} D{args.n_embd} F{args.svdfac}"
-        # xzl 
         if "RUN_NAME" in os.environ: 
             args.run_name = os.environ["RUN_NAME"] # set by slurm-rva.sh or run.sh
         else: 
@@ -207,13 +202,13 @@ if __name__ == "__main__":
                             p = int(p)
                         list_p += [p]
             list_p.sort()
-            if len(list_p) > 0:   # xzl
+            if len(list_p) > 0:   
                 max_p = list_p[-1]
             else:
-                max_p = -1 # xzl
+                max_p = -1
             if len(list_p) > 1:
                 args.my_pile_prev_p = list_p[-2]  # in case max_p is corrupted
-            if max_p == -1: # xzl: -init is init model file?
+            if max_p == -1: 
                 args.load_model = f"{args.proj_dir}/rwkv-init.pth"
             else:
                 args.load_model = f"{args.proj_dir}/rwkv-{max_p}.pth"
@@ -300,7 +295,6 @@ if __name__ == "__main__":
     from src.model import RWKV
     model = RWKV(args)      # construct the model...
 
-    #xzl: here init the model...        args.load_model: textual path to the model chkpt
     if len(args.load_model) == 0 or args.my_pile_stage == 1:  # shall we build the initial weights?
         init_weight_name = f"{args.proj_dir}/rwkv-init.pth"
         generate_init_weight(model, init_weight_name)  # save initial weights
@@ -326,7 +320,7 @@ if __name__ == "__main__":
             rank_zero_info(f"Trying {args.load_model}")
             load_dict = torch.load(args.load_model, map_location="cpu")
 
-    # xzl: now we have a good model file, run lm_eval. 
+    # now we have a good model file, run lm_eval. 
     #       -- ensures lm_eval works prior to training 
     if args.lm_eval_0 == 1:
         # if 'x058' == os.environ["RWKV_MY_TESTING"]:
@@ -343,7 +337,7 @@ if __name__ == "__main__":
         import json
         print(json.dumps(res)+'\n') # just write to console
 
-    # xzl: allow the ckpt file to lack certain params, in which case just 
+    # allow the ckpt file to lack certain params, in which case just 
     #   keep the model's params as is (what values???
     if args.load_partial == 1:
         load_keys = load_dict.keys()
@@ -352,7 +346,7 @@ if __name__ == "__main__":
                 if "head_l2" in k:
                     continue  # will process in "build head_l2" loop below
                 load_dict[k] = model.state_dict()[k]
-                # if "head_l1" in k or "head_l2" in k:        # xzl: cls head
+                # if "head_l1" in k or "head_l2" in k:        
                 if "head_l1.weight" in k:
                     if args.vocab_size > args.n_embd:
                         scale = 0.5 * math.sqrt(args.vocab_size / args.n_embd)
@@ -387,25 +381,7 @@ if __name__ == "__main__":
             args,
             callbacks=[train_callback(args)],
         )
-        # ^^ trainer.strategy also constructed
 
-    # xzl after loading model, print out info:  layers, params shapes, etc. 
-    #if trainer.global_rank == 0:
-    #    print("Dump model arch ....")
-    #    for n in model.state_dict():            # xzl: n: para name, can be used as key        cf https://pytorch.org/tutorials/recipes/recipes/what_is_state_dict.html             
-    #        # if "blocks." in n and not "blocks.0." in n: 
-    #        if not "blocks.0." in n: # only print params in "blocks"
-    #            continue # xzl: only print layer0, less cluter ....            
-    #        shape = model.state_dict()[n].shape
-    #        shape = [i for i in shape if i != 1]
-    #        if len(shape) > 2:
-    #            print(f"{str(shape[0]).ljust(5)} {str(shape[1]).ljust(5)} {str(shape[2]).ljust(5)} {n}")
-    #        elif len(shape) > 1:
-    #            print(f"{str(shape[0]).ljust(5)} {str(shape[1]).ljust(5)}       {n}")
-    #        elif len(shape) > 0:
-    #            print(f"{str(shape[0]).ljust(5)}             {n}")
-    #            # print(f"{str(shape).ljust(5)}             {n}")
-    #    print("(Omit other layers...")
     if trainer.global_rank == 0:
         print("Dump model arch ....")
         for n in model.state_dict():
@@ -419,7 +395,6 @@ if __name__ == "__main__":
         trainer.strategy.config["zero_optimization"]["allgather_bucket_size"] = args.ds_bucket_mb * 1000 * 1000
         trainer.strategy.config["zero_optimization"]["reduce_bucket_size"] = args.ds_bucket_mb * 1000 * 1000
 
-    # xzl: NB config strategy here.....
     # breakpoint()    
 
     # must set shuffle=False, persistent_workers=False (because worker is in another thread)
@@ -427,7 +402,6 @@ if __name__ == "__main__":
                                 batch_size=args.micro_bsz, 
                                 num_workers=0,      # =0 for debugging, =1 normal (=1 failed on mps, why??
                                 persistent_workers=False, drop_last=True)
-    # xzl: above: DataLoader decides how data is fed into trainer, which goes to callbacks in model.py
 
 
     if args.finetune or args.head_K > 1:
@@ -446,7 +420,7 @@ if __name__ == "__main__":
             tunepara = ["head_l1"]
             #tunepara = ["head_l1fc"]
 
-        model.requires_grad_(False)    #xzl this seems a must
+        model.requires_grad_(False)   
         for pname, param in model.named_parameters():
             for tp in tunepara:
                 if tp in pname:

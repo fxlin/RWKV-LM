@@ -104,7 +104,7 @@ class PIPELINE():
         all_tokens = []
         out_last = 0
         out_str = ''
-        occurrence = {}   # xzl: will decay over time 
+        occurrence = {}   
         if collect_sparse_data:
             data_tensors = [] # WC: FFN tensors * # of layers
         for i in range(token_count):
@@ -120,10 +120,8 @@ class PIPELINE():
                     out, state = self.model.forward(tokens[:args.chunk_len], state)
                 tokens = tokens[args.chunk_len:]
                 
-            # xzl: out: logits over all possible tokens
             for n in args.token_ban:
                 out[n] = -float('inf')
-            # xzl: reduce a logit for a token as it recurs...
             for n in occurrence:
                 out[n] -= (args.alpha_presence + occurrence[n] * args.alpha_frequency)
             

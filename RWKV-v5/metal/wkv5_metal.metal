@@ -2,8 +2,6 @@
 
 using namespace metal;
 
-// xzl: each arg must be either "device" or "constant"
-
 #define _N_ 64          // headsize
 
 // template <typename F>        // TBD type F ... bf16 (only??
@@ -33,7 +31,7 @@ kernel void kernel_forward(
     _u += h*_N_;   
 
     threadgroup float r[_N_], k[_N_], u[_N_], w[_N_];
-    float state[_N_] = {0};   // xzl: state pased across timesteps (thread private)
+    float state[_N_] = {0};   
 
     threadgroup_barrier(mem_flags::mem_threadgroup);
     w[i] = _w[i];
@@ -43,7 +41,7 @@ kernel void kernel_forward(
     for (int t = b*T*C + h*_N_ + i; t < (b+1)*T*C + h*_N_ + i; t += C) {
         // parallel load: from device mem to threadgrounp
         threadgroup_barrier(mem_flags::mem_threadgroup);
-        r[i] = float(_r[t]);    // xzl r is threadgrounp, i  thr id
+        r[i] = float(_r[t]);   
         k[i] = float(_k[t]);
         threadgroup_barrier(mem_flags::mem_threadgroup); // or mem_none?
 
@@ -71,13 +69,12 @@ kernel void kernel_forward(
             y += r_.z * (u_.z * x.z + s.z);
             y += r_.w * (u_.w * x.w + s.w);
 
-            // xzl: state update ... carry over to next iteration (timestep
             s.x = s.x * w_.x + x.x;
             s.y = s.y * w_.y + x.y;
             s.z = s.z * w_.z + x.z;
             s.w = s.w * w_.w + x.w;
         }
-        _y[t] = F(y);  // xzl: output the scalar (current timestep) to global var. F: typename        
+        _y[t] = F(y);  
         // _y[t] = static_cast<F>(y);  // seems ok
     }
 }
@@ -125,11 +122,10 @@ kernel void kernel_backward(
     const int b = tgpig.x / H;
     const int h = tgpig.x % H;
     const int i = tiitg;
-    _w += h*_N_;        // xzl: ew
+    _w += h*_N_;       
     _u += h*_N_;
-    __w += h*_N_;       // xzl: eew, bad naming
+    __w += h*_N_;  
 
-    // xzl: note the type ... all float
     threadgroup float w_[_N_], u_[_N_];
     threadgroup float r[_N_], k[_N_], v[_N_], gy[_N_];
     
@@ -148,27 +144,25 @@ kernel void kernel_backward(
 
     float gw = 0, gu = 0;
     const int t000 = b*T*C + h*_N_ + i;
-    const int t111 = (b+1)*T*C + h*_N_ + i;     // xzl: why not (b+1)*T*C???  easy to compute t222?
-    const int t222 = t111 - 2*C;        // xzl: ??? two tokens less
+    const int t111 = (b+1)*T*C + h*_N_ + i;     
+    const int t222 = t111 - 2*C;        
 
-    // xzl: pass 1.... compute gu   (over a sequence...
     for (int t = t000; t < t111; t += C) {
         // parallel load to blockemory... will be consuenmd by each thr
         threadgroup_barrier(mem_flags::mem_threadgroup);
         v[i] = float(_v[t]);
-        gy[i] = float(_gy[t]); // xzl: _gy grad from y (downstream
+        gy[i] = float(_gy[t]); 
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
         const float k = float(_k[t]);
         float gr = 0, gu_ = 0;
 
-        // xzl: cf forward on loop _N_
         #pragma unroll(_N_)
         for (int j = 0; j < _N_; j++) {
             thread float& s = state[j];
-            float x = k * v[j];         // xzl: kv
+            float x = k * v[j];         
 
-            gr += (u * x + s) * gy[j];  //  xzl accum gr..
+            gr += (u * x + s) * gy[j];
             gu_ += x * gy[j];
             s = s * w + x;
         }
@@ -177,15 +171,13 @@ kernel void kernel_backward(
     }
     _gu[b*C + h*_N_ + i] = F(gu);       // output gu....(shape B,C) grad on weights
     
-    // xzl: pass 2 ...compute gw (but 2 tokens less
     // state: saaaa sbbbb
     for (int t = t000; t < t222; t += C) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
         v[i] = float(_v[t]);
-        gy[i] = float(_gy[t + 2*C]);    // xzl: shift y                
+        gy[i] = float(_gy[t + 2*C]);  
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
-        // xzl: gw grad flowed from gy (2 timesteps later, why 2??
         const float k = float(_k[t]);
         float gw_ = 0;
         
@@ -196,11 +188,10 @@ kernel void kernel_backward(
             thread float& s2 = sbbbb[j];
             float x = k * v[j];
             
-            // xzl: to udnerstand btr... how graident flows wrt states (s,s2)
             float tmp = w * (x + s);
             s = tmp;
             s2 = tmp + w * s2;
-            gw_ += s2 * gy[j];      // xzl: graident from y 
+            gw_ += s2 * gy[j];      
         }
         gw += float(_r[t + 2*C]) * gw_;
     }    

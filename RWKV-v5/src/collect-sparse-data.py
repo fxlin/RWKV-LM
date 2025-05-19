@@ -27,7 +27,6 @@ print(f'Loading model - {model_path}')
 def my_print(s):
     print(s, end='', flush=True)
 
-# xzl: for strategy, cf: https://pypi.org/project/rwkv/ for more ex
 # Strategy Examples: (device = cpu/cuda/cuda:0/cuda:1/...)
 # 'cpu fp32' = all layers cpu fp32
 # 'cuda fp16' = all layers cuda fp16

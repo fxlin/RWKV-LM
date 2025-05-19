@@ -2,8 +2,6 @@ import json, math, random, sys, time, shutil, os, string, re, fileinput
 import numpy as np
 
 """
-xzl: this for finetuning on own (small) dataset...
-
 How to use:
 
 python make_data_verifyonly.py data/minipile.bin 4096
@@ -29,7 +27,6 @@ The final binidx will be like (here "/" means end_of_doc, which is actually toke
 bb/aa/dd/cc/dd/aa/bb/cc/dd/bb/cc/aa/
 
 where the data is repeated 3 times (each time with different shuffle)
-xzl: why has to repeat? 
 """
 
 ########################################################################################################
@@ -90,7 +87,7 @@ def is_prime(n):
 
 IN_FILE = sys.argv[1].strip()
 # OUT_NAME = os.path.splitext(os.path.basename(IN_FILE))[0]
-OUT_NAME = os.path.splitext(IN_FILE)[0] # xzl
+OUT_NAME = os.path.splitext(IN_FILE)[0] 
 CTX_LEN = int(sys.argv[2].strip())
 TEMP_FILE = "make_data_temp.jsonl"
 
@@ -101,7 +98,6 @@ data = MMapIndexedDataset(OUT_NAME)
 data_len = len(data)
 data_size = len(data._bin_buffer) // data._index._dtype_size
 
-# xzl: sample the first, & the last examples....
 # TODO = [0, data_len - 1]
 TODO = [0, data_len//16, data_len//8, data_len//2, data_len - 1]
 PREVIEW_LIMIT = 100

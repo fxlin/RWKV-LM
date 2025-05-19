@@ -2,8 +2,6 @@ import json, math, random, sys, time, shutil, os, string, re, fileinput
 import numpy as np
 
 """
-xzl: this for finetuning on own (small) dataset...
-
 How to use:
 
 python make_data.py demo.jsonl 3 4096
@@ -26,7 +24,6 @@ The final binidx will be like (here "/" means end_of_doc, which is actually toke
 bb/aa/dd/cc/dd/aa/bb/cc/dd/bb/cc/aa/
 
 where the data is repeated 3 times (each time with different shuffle)
-xzl: why has to repeat? 
 """
 
 ########################################################################################################

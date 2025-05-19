@@ -2,7 +2,6 @@
 #######################################################################################################################
 #
 # This will generate the initial model, and save it to the output folder
-# # xzl: the purpose of this script? "dry run??" create init model file etc?
 #######################################################################################################################
 #
 # Please firstly create data folder & Download minipile (1498226207 tokens, around 3GB)

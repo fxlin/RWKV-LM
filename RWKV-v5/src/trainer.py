@@ -5,8 +5,6 @@ import pytorch_lightning as pl
 from pytorch_lightning.utilities import rank_zero_info, rank_zero_only
 import deepspeed
 
-# xzl: seesm callbacks supplied to Trainer class
-
 def my_save(args, trainer, dd, ff):
     if '14b-run1' in ff:
         fn = ff.split('/')[-1]
@@ -22,7 +20,7 @@ def my_save(args, trainer, dd, ff):
     else:
         if 'deepspeed_stage_3' in args.strategy:
             trainer.save_checkpoint(ff, weights_only=True)
-        else:  # xzl: looks like we hit this line... dd: state_dict
+        else:  
             torch.save(dd, ff)
 
 class train_callback(pl.Callback):
@@ -30,11 +28,10 @@ class train_callback(pl.Callback):
         super().__init__()
         self.args = args
 
-    def on_after_backward(self, trainer, pl_module):     #xzl add
+    def on_after_backward(self, trainer, pl_module):  
         args = self.args
         real_step = trainer.global_step + args.epoch_begin * args.epoch_steps
         
-        # xzl -- logging grads ---
         # note deepspeed api
         # If all processes don’t participate these utilities will hang waiting for all processes to send their contribution                
         nlayers=len(pl_module.blocks)
@@ -249,7 +246,6 @@ class train_callback(pl.Callback):
                     wandb.init(
                         project=args.wandb,
                         name=args.run_name + " " + args.my_timestamp,
-                        # name=args.run_name + " FAC " + f"{FAC}" + args.my_timestamp, # xzl
                         config=args,
                         save_code=False,
                     )
@@ -274,7 +270,7 @@ class train_callback(pl.Callback):
                 trainer.my_loss = outputs["loss"]
             else:
                 trainer.my_loss = trainer.my_loss_all.float().mean().item()
-            trainer.my_loss_sum += trainer.my_loss          # xzl: trainer will cal loss already?
+            trainer.my_loss_sum += trainer.my_loss          
             trainer.my_loss_count += 1
             trainer.my_epoch_loss = trainer.my_loss_sum / trainer.my_loss_count
             self.log("lr", trainer.my_lr, prog_bar=True, on_step=True)
@@ -284,7 +280,7 @@ class train_callback(pl.Callback):
             if len(args.wandb) > 0:
                 lll = {"loss": trainer.my_loss, "lr": trainer.my_lr, "wd": trainer.my_wd, "Gtokens": real_step * token_per_step / 1e9}
                 if kt_s > 0:
-                    lll["kt/s"] = kt_s  # xzl: k tokens per sec??
+                    lll["kt/s"] = kt_s
                 trainer.my_wandb.log(lll, step=int(real_step))
         if (trainer.is_global_zero) or ('deepspeed_stage_3' in args.strategy): # save pth
             if args.magic_prime > 0:
@@ -334,7 +330,7 @@ class train_callback(pl.Callback):
                     print('Error\n\n', e, '\n\n')
 
         if trainer.is_global_zero:  # logging
-            if trainer.my_epoch_loss < 10: # xzl, otherwise math.exp() below may cause math range err...
+            if trainer.my_epoch_loss < 10: 
                 trainer.my_log.write(f"{args.epoch_begin + trainer.current_epoch} {trainer.my_epoch_loss:.6f} {math.exp(trainer.my_epoch_loss):.4f} {trainer.my_lr:.8f} {datetime.datetime.now()} {trainer.current_epoch}\n")
             else: # loss too large, dont print out exp(loss)
                 trainer.my_log.write(f"{args.epoch_begin + trainer.current_epoch} {trainer.my_epoch_loss:.6f} ----- {trainer.my_lr:.8f} {datetime.datetime.now()} {trainer.current_epoch}\n")
@@ -356,8 +352,6 @@ class train_callback(pl.Callback):
                 res = do_eval(eval_model_path)
                 clean_cache() # otherwise run_lm_eval will cache for future runs
 
-                # "res" looks like:
-                # {'lambada_openai': {'ppl': 173.28, 'ppl_stderr': 7.60, 'acc': 0.182, 'acc_stderr': 0.0053}}
                 res0={'lambada_openai_acc':res['lambada_openai']['acc']}
                 import json
                 trainer.my_log.write(datetime.datetime.today().strftime("%Y-%m-%d-%H-%M-%S "))

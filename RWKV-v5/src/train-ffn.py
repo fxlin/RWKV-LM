@@ -157,7 +157,6 @@ def train_layer(layer_id):
 
                     # Compute accuracy (considering outputs > 0.5 as True, else False)
                     predicted = (val_outputs > 0.5).float()
-                    # predicted = (val_outputs > 0.35).float()          # xzl: can play with this 
 
                     # Compute recall
                     true_positives = (predicted * val_labels).sum()  # Count of TP
@@ -190,7 +189,7 @@ def train_layer(layer_id):
             val_loss = loss_fn(val_outputs, val_labels).mean()
 
             # Compute accuracy (considering outputs > 0.5 as True, else False)
-            predicted = (val_outputs > thr).float()         # xzl: can play with this 
+            predicted = (val_outputs > thr).float()        
             # predicted: tensor shape (#batches, batch_size, D2)
             correct = (predicted == val_labels).float().sum()
             val_accuracy = correct / (val_labels.numel())

@@ -2,8 +2,6 @@
 import re
 
 '''
-# xzl: can do the following things: 
-
 ##  WARNING WARNING WARNING MUST SET args.n_layers, n_embd, see line 400
 
 ###################
@@ -80,7 +78,6 @@ MyFunction = torch.jit.script_method
 
 # args = types.SimpleNamespace()
 
-# xzl: this returns a rank 
 def build_ranks(sigma):
     """
     sigma: the eigenvalues
@@ -93,7 +90,7 @@ def build_ranks(sigma):
 
 def decompose_emb(args):
     print(f"to load orig model {args.MODEL_NAME}.pth...")
-    w = torch.load(args.MODEL_NAME + '.pth', map_location='cpu') # xzl: load model...    
+    w = torch.load(args.MODEL_NAME + '.pth', map_location='cpu') 
     print("model loaded")
 
     layer_indices = set()
@@ -141,7 +138,7 @@ def decompose_emb(args):
 # strip _diag from given model 
 def strip_diag(args): 
     print(f"to load model {args.MODEL_NAME}.pth...")
-    w00 = torch.load(args.MODEL_NAME + '.pth', map_location='cpu') # xzl: load model...
+    w00 = torch.load(args.MODEL_NAME + '.pth', map_location='cpu') 
     print("model loaded")
 
     keys_del = []
@@ -169,7 +166,6 @@ def full_to_svd(w,args):
     if args.decompose_ffn == 1: 
         selfkeys += [".ffn.receptance."]
 
-    # xzl: all params saved in bfloat16 in model file
     for k in w.keys():
         # print(k)  #  also print para names on the way...
         w[k] = w[k].float() # convert to f32 type      
@@ -338,7 +334,7 @@ def compare(w0, w1):
 
 def decompose_orig(args):
     print(f"to load orig model {args.MODEL_NAME}.pth...")
-    w0 = torch.load(args.MODEL_NAME + '.pth', map_location='cpu') # xzl: load model...    
+    w0 = torch.load(args.MODEL_NAME + '.pth', map_location='cpu')
     print("model loaded")
 
     print("decompose to svd model...")
@@ -353,7 +349,7 @@ def decompose_orig(args):
     w2 = torch.load(
         f"{args.MODEL_NAME}-svd-F{args.svdfac}.pth",
         map_location='cpu'
-        ) # xzl: load model...
+        )
     print("model loaded")
 
     print("recover full model & cmp...")
@@ -366,7 +362,7 @@ def decompose_orig(args):
 #       so it can be exec with unmodified infer engine
 def recover(args):
     print(f"to load custom model {args.MODEL_NAME}.pth...")
-    w0 = torch.load(args.MODEL_NAME + '.pth', map_location='cpu') # xzl: load model...
+    w0 = torch.load(args.MODEL_NAME + '.pth', map_location='cpu')
     print("model loaded")
 
     w00 = svd_recover_to_full(w0,args) 

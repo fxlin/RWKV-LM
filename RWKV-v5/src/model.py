@@ -15,7 +15,7 @@ if importlib.util.find_spec('deepspeed'):
     import deepspeed
     from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
 
-import numpy as np      # xzl
+import numpy as np      # 
 import platform
 
 # from deepspeed.runtime.fp16.onebit.zoadam import ZeroOneAdam
@@ -40,7 +40,7 @@ if os.environ["RWKV_JIT_ON"] == "1":
 # CUDA Kernel
 ########################################################################################################
 
-mydumpcnt = -1;     # xzl, for dumping wkv kernel input/output, set to -1 to disable
+mydumpcnt = -1;     # , for dumping wkv kernel input/output, set to -1 to disable
     
 from torch.utils.cpp_extension import load
 
@@ -198,7 +198,7 @@ elif os.environ["RWKV_MY_TESTING"] in ['x052', 'x058', 'x059', 'x0594', 'x0595',
         def forward(ctx, B, T, C, H, r, k, v, w, u):
             with torch.no_grad():
                 if platform.system() == 'Darwin':   
-                    # xzl can only do fp32 training... the cast below slow(?
+                    #  can only do fp32 training... the cast below slow(?
                     r=r.to(dtype=torch.bfloat16)
                     k=k.to(dtype=torch.bfloat16)
                     v=v.to(dtype=torch.bfloat16)
@@ -219,16 +219,15 @@ elif os.environ["RWKV_MY_TESTING"] in ['x052', 'x058', 'x059', 'x0594', 'x0595',
                 assert v.is_contiguous()
                 assert w.is_contiguous()
                 assert u.is_contiguous()
-                ew = (-torch.exp(w.float())).contiguous()       # xzl e^w
-                eew = (torch.exp(ew)).contiguous()          # xzl e^ew ... passed to cuda kern
+                ew = (-torch.exp(w.float())).contiguous()      
+                eew = (torch.exp(ew)).contiguous()        
                 ctx.save_for_backward(r, k, v, eew, ew, u) 
-                # xzl: y: output
                 y = torch.empty((B, T, C), device=r.device, dtype=torch.bfloat16, memory_format=torch.contiguous_format) # .uniform_(-1, 1)
                 wkv5_gpu.forward(B, T, C, H, r, k, v, eew, u, y)
                 return y
 
         @staticmethod
-        def backward(ctx, gy):  # xzl: gy gradient of y
+        def backward(ctx, gy): 
             with torch.no_grad():
                 assert gy.dtype == torch.bfloat16
                 B = ctx.B
@@ -236,7 +235,7 @@ elif os.environ["RWKV_MY_TESTING"] in ['x052', 'x058', 'x059', 'x0594', 'x0595',
                 C = ctx.C
                 H = ctx.H
                 assert gy.is_contiguous()
-                r, k, v, eew, ew, u = ctx.saved_tensors # xzl: saved in fwd pass
+                r, k, v, eew, ew, u = ctx.saved_tensors
                 gr = torch.empty((B, T, C), device=gy.device, requires_grad=False, dtype=torch.bfloat16, memory_format=torch.contiguous_format) # .uniform_(-1, 1)
                 gk = torch.empty((B, T, C), device=gy.device, requires_grad=False, dtype=torch.bfloat16, memory_format=torch.contiguous_format) # .uniform_(-1, 1)
                 gv = torch.empty((B, T, C), device=gy.device, requires_grad=False, dtype=torch.bfloat16, memory_format=torch.contiguous_format) # .uniform_(-1, 1)
@@ -254,11 +253,11 @@ elif os.environ["RWKV_MY_TESTING"] in ['x052', 'x058', 'x059', 'x0594', 'x0595',
                     mydumpcnt+=1
 
                 gw = torch.sum(gw, 0).view(H, C//H)
-                gu = torch.sum(gu, 0).view(H, C//H)  # xzl view by head?
+                gu = torch.sum(gu, 0).view(H, C//H)  
                 return (None, None, None, None, gr, gk, gv, gw, gu)
 
     def RUN_CUDA_RWKV5(B, T, C, H, r, k, v, w, u):
-        return WKV_5.apply(B, T, C, H, r, k, v, w, u)   #xzl: goes to forward/backward above    
+        return WKV_5.apply(B, T, C, H, r, k, v, w, u)   
 elif 'mamba' in os.environ["RWKV_MY_TESTING"]:
     from mamba_ssm import Mamba
 else: 
@@ -296,7 +295,7 @@ class RWKV_Tmix_x052(MyModule):
 
             # fancy time_decay
             decay_speed = torch.ones(args.dim_att)
-            for n in range(args.dim_att):       # xzl: assign diff decay speeds ... each head, each dim?? (for init
+            for n in range(args.dim_att):       # : assign diff decay speeds ... each head, each dim?? (for init
                 decay_speed[n] = -6 + 5 * (n / (args.dim_att - 1)) ** (0.7 + 1.3 * ratio_0_to_1)
             self.time_decay = nn.Parameter(decay_speed.reshape(self.n_head, self.head_size))  
             # print(layer_id, self.time_decay.flatten()[:3].cpu().numpy(), '...', self.time_decay.flatten()[-3:].cpu().numpy())
@@ -317,19 +316,19 @@ class RWKV_Tmix_x052(MyModule):
         self.gate = nn.Linear(args.n_embd, args.dim_att, bias=False)
         self.ln_x = nn.GroupNorm(self.n_head, args.dim_att)
 
-    # xzl: x->r/k/v/g see below   MyFunction -> torch script jit. default on??
+    # : x->r/k/v/g see below   MyFunction -> torch script jit. default on??
     @MyFunction
     def jit_func(self, x):
-        B, T, C = x.size()      # xzl: NB the size
+        B, T, C = x.size()      # : NB the size
 
-        # xzl: NB only mix with prev ts. (not all the way to the beginning. cf time_shift()
+        # : NB only mix with prev ts. (not all the way to the beginning. cf time_shift()
         xx = self.time_shift(x) # Mix x with the previous timestep to produce xk, xv, xr
         xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
         xv = x * self.time_mix_v + xx * (1 - self.time_mix_v)
         xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
         xg = x * self.time_mix_g + xx * (1 - self.time_mix_g)
 
-        # xzl: after mix, project 
+        # : after mix, project 
         r = self.receptance(xr)
         k = self.key(xk)
         v = self.value(xv)
@@ -337,7 +336,7 @@ class RWKV_Tmix_x052(MyModule):
 
         return r, k, v, g
 
-    # xzl: x/g->x see below
+    # : x/g->x see below
     @MyFunction
     def jit_func_2(self, x, g):
         B, T, C = x.size()
@@ -353,7 +352,7 @@ class RWKV_Tmix_x052(MyModule):
 
         r, k, v, g = self.jit_func(x)
 
-        # xzl: cf above. (from paper) B batchsz T maxseqlen C channels H heads?; r,k,v are vectors (?)
+        # : cf above. (from paper) B batchsz T maxseqlen C channels H heads?; r,k,v are vectors (?)
         #       how about s? (from prev timestep <<<<< biggest question so far
         #           no weights so no training needed???
         x = RUN_CUDA_RWKV5(B, T, C, H, r, k, v, w=self.time_decay, u=self.time_faaaa)
@@ -388,7 +387,7 @@ class RWKV_Tmix_x059(MyModule):
 
             # fancy time_decay
             decay_speed = torch.ones(args.dim_att)
-            for n in range(args.dim_att):       # xzl: assign diff decay speeds ... each head, each dim?? (for init
+            for n in range(args.dim_att):       # : assign diff decay speeds ... each head, each dim?? (for init
                 decay_speed[n] = -6 + 5 * (n / (args.dim_att - 1)) ** (0.7 + 1.3 * ratio_0_to_1)
             self.time_decay = nn.Parameter(decay_speed.reshape(self.n_head, self.head_size))  
             # print(layer_id, self.time_decay.flatten()[:3].cpu().numpy(), '...', self.time_decay.flatten()[-3:].cpu().numpy())
@@ -428,19 +427,19 @@ class RWKV_Tmix_x059(MyModule):
 
         self.ln_x = nn.GroupNorm(self.n_head, args.dim_att)
 
-    # xzl: x->r/k/v/g see below   MyFunction -> torch script jit. default on??
+    # : x->r/k/v/g see below   MyFunction -> torch script jit. default on??
     @MyFunction
     def jit_func(self, x):
-        B, T, C = x.size()      # xzl: NB the size
+        B, T, C = x.size()      # : NB the size
         
-        # xzl: NB only mix with prev ts. (not all the way to the beginning. cf time_shift()
+        # : NB only mix with prev ts. (not all the way to the beginning. cf time_shift()
         xx = self.time_shift(x) # Mix x with the previous timestep to produce xk, xv, xr
         xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
         xv = x * self.time_mix_v + xx * (1 - self.time_mix_v)
         xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
         xg = x * self.time_mix_g + xx * (1 - self.time_mix_g)
 
-        # xzl: after mix, project 
+        # : after mix, project 
 
         # r = self.receptance(xr) # orig
         r = self.receptance1(xr)  
@@ -473,7 +472,7 @@ class RWKV_Tmix_x059(MyModule):
 
         return r, k, v, g
 
-    # xzl: x,g->x see below. UNCHANGED for v5.8, 5.9
+    # : x,g->x see below. UNCHANGED for v5.8, 5.9
     @MyFunction
     def jit_func_2(self, x, g):
         B, T, C = x.size()
@@ -493,7 +492,7 @@ class RWKV_Tmix_x059(MyModule):
 
         r, k, v, g = self.jit_func(x)
 
-        # xzl: cf above. (from paper) B batchsz T maxseqlen C channels H #of heads
+        # : cf above. (from paper) B batchsz T maxseqlen C channels H #of heads
         #       r,k,v are vectors (?)
         #       s: state
         #       (A: inside the cuda kernel, serial scan
@@ -536,7 +535,7 @@ class RWKV_Tmix_x058(MyModule):
 
             # fancy time_decay
             decay_speed = torch.ones(args.dim_att)
-            for n in range(args.dim_att):       # xzl: assign diff decay speeds ... each head, each dim?? (for init
+            for n in range(args.dim_att):       # : assign diff decay speeds ... each head, each dim?? (for init
                 decay_speed[n] = -6 + 5 * (n / (args.dim_att - 1)) ** (0.7 + 1.3 * ratio_0_to_1)
             self.time_decay = nn.Parameter(decay_speed.reshape(self.n_head, self.head_size))  
             # print(layer_id, self.time_decay.flatten()[:3].cpu().numpy(), '...', self.time_decay.flatten()[-3:].cpu().numpy())
@@ -572,19 +571,19 @@ class RWKV_Tmix_x058(MyModule):
 
         self.ln_x = nn.GroupNorm(self.n_head, args.dim_att)
 
-    # xzl: x->r/k/v/g see below   MyFunction -> torch script jit. default on??
+    # : x->r/k/v/g see below   MyFunction -> torch script jit. default on??
     @MyFunction
     def jit_func(self, x):
-        B, T, C = x.size()      # xzl: NB the size
+        B, T, C = x.size()      # : NB the size
         
-        # xzl: NB only mix with prev ts. (not all the way to the beginning. cf time_shift()
+        # : NB only mix with prev ts. (not all the way to the beginning. cf time_shift()
         xx = self.time_shift(x) # Mix x with the previous timestep to produce xk, xv, xr
         xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
         xv = x * self.time_mix_v + xx * (1 - self.time_mix_v)
         xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
         xg = x * self.time_mix_g + xx * (1 - self.time_mix_g)
 
-        # xzl: after mix, project 
+        # : after mix, project 
 
         # r = self.receptance(xr) # orig
         r = self.receptance1(xr)  
@@ -605,7 +604,7 @@ class RWKV_Tmix_x058(MyModule):
 
         return r, k, v, g
 
-    # xzl: x,g->x see below   (unchanged for 5.8, 5.9) 
+    # : x,g->x see below   (unchanged for 5.8, 5.9) 
     @MyFunction
     def jit_func_2(self, x, g):
         B, T, C = x.size()
@@ -625,7 +624,7 @@ class RWKV_Tmix_x058(MyModule):
 
         r, k, v, g = self.jit_func(x)
 
-        # xzl: cf above. (from paper) B batchsz T maxseqlen C channels H #of heads
+        # : cf above. (from paper) B batchsz T maxseqlen C channels H #of heads
         #       r,k,v are vectors (?)
         #       s: state
         #       (A: inside the cuda kernel, serial scan
@@ -634,7 +633,7 @@ class RWKV_Tmix_x058(MyModule):
 
         return self.jit_func_2(x, g)
 
-# xzl: v6 time mixing.... to understand lter
+# : v6 time mixing.... to understand lter
 class RWKV_Tmix_x060(MyModule):
     def __init__(self, args, layer_id):
         super().__init__()
@@ -1310,11 +1309,11 @@ class RWKV_CMix_x052(MyModule):
 
     @MyFunction
     def forward(self, x):
-        xx = self.time_shift(x) # xzl: also, mix with prev timestep (not all the way to the beginning
+        xx = self.time_shift(x) # : also, mix with prev timestep (not all the way to the beginning
         xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
         xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
         k = self.key(xk)
-        k = torch.relu(k) ** 2  #xzl: sqr relu
+        k = torch.relu(k) ** 2  #: sqr relu
         kv = self.value(k)
         return torch.sigmoid(self.receptance(xr)) * kv
 
@@ -1337,7 +1336,7 @@ class RWKV_CMix_x059_r(MyModule):
             self.time_mix_k = nn.Parameter(torch.pow(ddd, ratio_1_to_almost0))
             self.time_mix_r = nn.Parameter(torch.pow(ddd, ratio_1_to_almost0))
         
-        # xzl: May 2024 below upper projection n_embd->(3.5x)n_embed is different than 
+        # : May 2024 below upper projection n_embd->(3.5x)n_embed is different than 
         # others, i.e. n_embd->n_embd projection
         # 1. if we follow the theory of svd for finetuning, it's gonna be         
         # n_embd -> n_embd//svdfac ->dim_ffn (b/c the svd rank) which creates a very narrow 
@@ -1363,13 +1362,13 @@ class RWKV_CMix_x059_r(MyModule):
 
     @MyFunction
     def forward(self, x):
-        xx = self.time_shift(x) # xzl: also, mix with prev timestep (not all the way to the beginning
+        xx = self.time_shift(x) # : also, mix with prev timestep (not all the way to the beginning
         xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
         xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
         
         k = self.key(xk)
 
-        k = torch.relu(k) ** 2  #xzl: sqr relu, in original design 
+        k = torch.relu(k) ** 2  #: sqr relu, in original design 
 
         kv = self.value(k)
 
@@ -1408,7 +1407,7 @@ class RWKV_CMix_x058_r(MyModule):
             self.time_mix_k = nn.Parameter(torch.pow(ddd, ratio_1_to_almost0))
             self.time_mix_r = nn.Parameter(torch.pow(ddd, ratio_1_to_almost0))
         
-        # xzl: May 2024 below upper projection n_embd->(3.5x)n_embed is different than 
+        # : May 2024 below upper projection n_embd->(3.5x)n_embed is different than 
         # others, i.e. n_embd->n_embd projection
         # 1. if we follow the theory of svd for finetuning, it's gonna be         
         # n_embd -> n_embd//svdfac ->dim_ffn (b/c the svd rank) which creates a very narrow 
@@ -1433,13 +1432,13 @@ class RWKV_CMix_x058_r(MyModule):
 
     @MyFunction
     def forward(self, x):
-        xx = self.time_shift(x) # xzl: also, mix with prev timestep (not all the way to the beginning
+        xx = self.time_shift(x) # : also, mix with prev timestep (not all the way to the beginning
         xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
         xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
         
         k = self.key(xk)
 
-        k = torch.relu(k) ** 2  #xzl: sqr relu, in original design 
+        k = torch.relu(k) ** 2  #: sqr relu, in original design 
 
         kv = self.value(k)
 
@@ -1471,7 +1470,7 @@ class RWKV_CMix_x059_rkv(MyModule):
             self.time_mix_k = nn.Parameter(torch.pow(ddd, ratio_1_to_almost0))
             self.time_mix_r = nn.Parameter(torch.pow(ddd, ratio_1_to_almost0))
         
-        # xzl: May 2024 below upper projection n_embd->(3.5x)n_embed is different than 
+        # : May 2024 below upper projection n_embd->(3.5x)n_embed is different than 
         # others, i.e. n_embd->n_embd projection
         # 1. if we follow the theory of svd for finetuning, it's gonna be         
         # n_embd -> n_embd//svdfac ->dim_ffn (b/c the svd rank) which creates a very narrow 
@@ -1496,7 +1495,7 @@ class RWKV_CMix_x059_rkv(MyModule):
 
     @MyFunction
     def forward(self, x):
-        xx = self.time_shift(x) # xzl: also, mix with prev timestep (not all the way to the beginning
+        xx = self.time_shift(x) # : also, mix with prev timestep (not all the way to the beginning
         xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
         xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
 
@@ -1505,7 +1504,7 @@ class RWKV_CMix_x059_rkv(MyModule):
             k = torch.relu(k) ** 2
         k = self.key2(k)
 
-        k = torch.relu(k) ** 2  #xzl: sqr relu, in original design 
+        k = torch.relu(k) ** 2  #: sqr relu, in original design 
 
         kv = self.value1(k)
         if self.hasrelu:
@@ -1541,7 +1540,7 @@ class RWKV_CMix_x0594_rkv(MyModule):
             self.time_mix_k = nn.Parameter(torch.pow(ddd, ratio_1_to_almost0))
             self.time_mix_r = nn.Parameter(torch.pow(ddd, ratio_1_to_almost0))
         
-        # xzl: May 2024 below upper projection n_embd->(3.5x)n_embed is different than 
+        # : May 2024 below upper projection n_embd->(3.5x)n_embed is different than 
         # others, i.e. n_embd->n_embd projection
         # 1. if we follow the theory of svd for finetuning, it's gonna be         
         # n_embd -> n_embd//svdfac ->dim_ffn (b/c the svd rank) which creates a very narrow 
@@ -1567,7 +1566,7 @@ class RWKV_CMix_x0594_rkv(MyModule):
 
     @MyFunction
     def forward(self, x):
-        xx = self.time_shift(x) # xzl: also, mix with prev timestep (not all the way to the beginning
+        xx = self.time_shift(x) # : also, mix with prev timestep (not all the way to the beginning
         xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
         xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
 
@@ -1575,7 +1574,7 @@ class RWKV_CMix_x0594_rkv(MyModule):
         if self.hasrelu:
             k = torch.relu(k) ** 2
         k = self.key2(k)
-        k = torch.relu(k) ** 2  #xzl: sqr relu, in original design 
+        k = torch.relu(k) ** 2  #: sqr relu, in original design 
        
         kv = self.value1(k)
         if self.hasrelu:
@@ -1612,7 +1611,7 @@ class RWKV_CMix_x0595_rkv(MyModule):
             self.time_mix_k = nn.Parameter(torch.pow(ddd, ratio_1_to_almost0))
             self.time_mix_r = nn.Parameter(torch.pow(ddd, ratio_1_to_almost0))
         
-        # xzl: May 2024 below upper projection n_embd->(3.5x)n_embed is different than 
+        # : May 2024 below upper projection n_embd->(3.5x)n_embed is different than 
         # others, i.e. n_embd->n_embd projection
         # 1. if we follow the theory of svd for finetuning, it's gonna be         
         # n_embd -> n_embd//svdfac ->dim_ffn (b/c the svd rank) which creates a very narrow 
@@ -1640,7 +1639,7 @@ class RWKV_CMix_x0595_rkv(MyModule):
 
     @MyFunction
     def forward(self, x):
-        xx = self.time_shift(x) # xzl: also, mix with prev timestep (not all the way to the beginning
+        xx = self.time_shift(x) # : also, mix with prev timestep (not all the way to the beginning
         xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
         xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
 
@@ -1657,7 +1656,7 @@ class RWKV_CMix_x0595_rkv(MyModule):
         # padding (up projection)
         kpad = F.pad(k1, (0, k.shape[-1] - k1.shape[-1]))
         k += kpad
-        k = torch.relu(k) ** 2  #xzl: sqr relu, in original design 
+        k = torch.relu(k) ** 2  #: sqr relu, in original design 
 
         kv = self.value1(k)
         if self.hasrelu:
@@ -1700,7 +1699,7 @@ class RWKV_CMix_x0596_rkv(MyModule):
             self.time_mix_k = nn.Parameter(torch.pow(ddd, ratio_1_to_almost0))
             self.time_mix_r = nn.Parameter(torch.pow(ddd, ratio_1_to_almost0))
         
-        # xzl: May 2024 below upper projection n_embd->(3.5x)n_embed is different than 
+        # : May 2024 below upper projection n_embd->(3.5x)n_embed is different than 
         # others, i.e. n_embd->n_embd projection
         # 1. if we follow the theory of svd for finetuning, it's gonna be         
         # n_embd -> n_embd//svdfac ->dim_ffn (b/c the svd rank) which creates a very narrow 
@@ -1728,7 +1727,7 @@ class RWKV_CMix_x0596_rkv(MyModule):
 
     @MyFunction
     def forward(self, x):
-        xx = self.time_shift(x) # xzl: also, mix with prev timestep (not all the way to the beginning
+        xx = self.time_shift(x) # : also, mix with prev timestep (not all the way to the beginning
         xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
         xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
 
@@ -1746,7 +1745,7 @@ class RWKV_CMix_x0596_rkv(MyModule):
         k1 = xk * self.key_diag             
         k1 = k1.sum(dim=-1, keepdim=True)  
         k += k1
-        k = torch.relu(k) ** 2  #xzl: sqr relu, in original design 
+        k = torch.relu(k) ** 2  #: sqr relu, in original design 
        
         kv = self.value1(k)
         if self.hasrelu:
@@ -1866,7 +1865,7 @@ class MishGLU(MyModule):
 # The RWKV Model with our blocks
 ########################################################################################################
 
-# xzl: a layer
+# : a layer
 class Block(nn.Module):
     def __init__(self, args, layer_id):
         super().__init__()
@@ -1889,8 +1888,8 @@ class Block(nn.Module):
         #     args.NoReLu=False
         #     args.NoDiag=False
 
-        # xzl: attn, shop around ....
-        if self.layer_id == 0 and self.args.pre_ffn > 0:        # xzl: replace layer0 attn with ffn.. trick
+        # : attn, shop around ....
+        if self.layer_id == 0 and self.args.pre_ffn > 0:        # : replace layer0 attn with ffn.. trick
             self.ffnPre = RWKV_ChannelMix(args, 0)
         else:
             if 'x070' in os.environ["RWKV_MY_TESTING"]:
@@ -1915,7 +1914,7 @@ class Block(nn.Module):
             elif 'mamba' in os.environ["RWKV_MY_TESTING"]:
                 self.att = Mamba(d_model=args.n_embd, d_state=16, d_conv=4, expand=2.125) # match rwkv6 #params
 
-        # xzl: ffn, shop around ....
+        # : ffn, shop around ....
         # if 'g' in os.environ["RWKV_MY_TESTING"]:
         #     self.ffn = MishGLU(args, layer_id)
         # elif 'x060' in os.environ["RWKV_MY_TESTING"]:
@@ -1938,12 +1937,12 @@ class Block(nn.Module):
         elif 'mamba' in os.environ["RWKV_MY_TESTING"]:
             self.ffn = Mamba(d_model=args.n_embd, d_state=16, d_conv=4, expand=2.125) # match rwkv6 #params
         
-        if args.tiny_att_dim > 0 and self.layer_id == args.tiny_att_layer:      # xzl can "shink" att dim at specified layers...
+        if args.tiny_att_dim > 0 and self.layer_id == args.tiny_att_layer:      #  can "shink" att dim at specified layers...
             self.tiny_ln = nn.LayerNorm(args.n_embd)
             self.tiny_q = nn.Linear(args.n_embd, args.tiny_att_dim, bias=False)
             self.tiny_k = nn.Linear(args.n_embd, args.tiny_att_dim, bias=False)
             self.tiny_v = nn.Linear(args.n_embd, args.n_embd, bias=False)
-            self.register_buffer("tiny_mask", torch.tril(torch.ones(args.ctx_len, args.ctx_len))) # xzl: understadn this btter
+            self.register_buffer("tiny_mask", torch.tril(torch.ones(args.ctx_len, args.ctx_len))) # : understadn this btter
 
         if args.dropout > 0:
             self.drop0 = nn.Dropout(p = args.dropout)
@@ -1962,7 +1961,7 @@ class Block(nn.Module):
     else:
         def forward(self, x, x_emb=None):
             args = self.args
-            B, T, C = x.size()          # xzl: NB  shape of x
+            B, T, C = x.size()          # : NB  shape of x
             if self.layer_id == 0:
                 x = self.ln0(x)
                 if args.my_pos_emb > 0:
@@ -1991,14 +1990,14 @@ class Block(nn.Module):
                 x = x + c @ self.tiny_v(x_emb)
             return x
 
-# xzl: whats this for 
+# : whats this for 
 class L2Wrap(torch.autograd.Function):
     @staticmethod
     def forward(ctx, loss, y):
         ctx.save_for_backward(y)
         return loss
 
-    # xzl: backward ... return grad and grad on logits???
+    # : backward ... return grad and grad on logits???
     # (to understand better....
 
     @staticmethod
@@ -2036,9 +2035,9 @@ class RWKV(pl.LightningModule):
         self.blocks = nn.ModuleList([Block(args, i) for i in range(args.n_layer)])
 
         self.ln_out = nn.LayerNorm(args.n_embd)
-        self.head = nn.Linear(args.n_embd, args.vocab_size, bias=False)   # xzl:classification head
+        self.head = nn.Linear(args.n_embd, args.vocab_size, bias=False)   # :classification head
 
-        # xzl: compress cls head as two layers....
+        # : compress cls head as two layers....
         if args.head_K > 1:                        
             K = args.head_K
             # labels = np.load('out/RWKV-5-World-0.4B-v2-20231113-ctx4096-emb-cluster-labels.npy')
@@ -2064,8 +2063,8 @@ class RWKV(pl.LightningModule):
                 self.clusters[c].append(i)
             for c in range(K):
                 self.head_l2.append(nn.Linear(args.n_embd, len(self.clusters[c]), bias=False))
-        if args.head_qk > 0:        # xzl: (cf README) disabled in training script.
-            self.head_q = nn.Linear(args.n_embd, args.head_qk, bias=False)  # xzl: additional projection??
+        if args.head_qk > 0:        # : (cf README) disabled in training script.
+            self.head_q = nn.Linear(args.n_embd, args.head_qk, bias=False)  # : additional projection??
             self.head_k = nn.Linear(args.n_embd, args.head_qk, bias=False)
             self.register_buffer("copy_mask", torch.tril(torch.ones(args.ctx_len, args.ctx_len)))
         if args.dropout > 0:
@@ -2074,7 +2073,7 @@ class RWKV(pl.LightningModule):
     def configure_optimizers(self):
         args = self.args
         
-        # xzl: gropu params .... rlues below 
+        # : gropu params .... rlues below 
         #   then assign diff LR, weight decay, scale ... to gropus
         lr_decay = set()
         lr_1x = set()
@@ -2082,13 +2081,13 @@ class RWKV(pl.LightningModule):
         lr_3x = set()
         for n, p in self.named_parameters():  
 
-            # xzl: dirty hack. still compute grads, but keep out of optimizer....
+            # : dirty hack. still compute grads, but keep out of optimizer....
             # if not p.requires_grad:     
             #    p.requires_grad=True  
             #    # cf train.py "args.finetune"
             #    continue
 
-            # xzl: otherwise we'll have empty para group for optim
+            # : otherwise we'll have empty para group for optim
             if not p.requires_grad:
                 continue
 
@@ -2125,7 +2124,7 @@ class RWKV(pl.LightningModule):
         lr_2x = sorted(list(lr_2x))
         lr_3x = sorted(list(lr_3x))
 
-        # xzl: too much print info ... 
+        # : too much print info ... 
         # if self.trainer.is_global_zero:
         #     print('decay', lr_decay, '\n')
         #     print('1x', lr_1x, '\n')
@@ -2150,7 +2149,7 @@ class RWKV(pl.LightningModule):
         else:
             optim_groups = [{"params": [param_dict[n] for n in lr_1x], "weight_decay": 0.0, "my_lr_scale": 1.0}]
 
-        # xzl FusedAdam(): fused gpu kernels in adam optimizer, cuda only 
+        #  FusedAdam(): fused gpu kernels in adam optimizer, cuda only 
         #       it seems to have (almost) identical interfacea s torch.optim.AdamW
         if args.weight_decay > 0:
             optim_groups += [{"params": [param_dict[n] for n in lr_decay], "weight_decay": args.weight_decay, "my_lr_scale": 1.0}]
@@ -2178,13 +2177,13 @@ class RWKV(pl.LightningModule):
         return False
     
     def forward(self, idx, target_cls=None):
-        # xzl: idx: token idx, in (B,T). takes all of them for one pass
+        # : idx: token idx, in (B,T). takes all of them for one pass
         # target_cls -- target cluster ID (for forced learning
         args = self.args
         B, T = idx.size()
         assert T <= args.ctx_len, "Cannot forward, model ctx_len is exhausted."
 
-        x = self.emb(idx)       # xzl: lookup token embddings
+        x = self.emb(idx)       # : lookup token embddings
         x_emb = x
 
         if args.dropout > 0:
@@ -2195,7 +2194,7 @@ class RWKV(pl.LightningModule):
                     x = deepspeed.checkpointing.checkpoint(block, x, x_emb)
                 else:
                     x = block(x, x_emb)
-        else:  # xzl: go through all layers
+        else:  # : go through all layers
             if 'x070' in os.environ["RWKV_MY_TESTING"] or 'x078' in os.environ["RWKV_MY_TESTING"]:
                 v_first = torch.empty_like(x)
                 for block in self.blocks:
@@ -2210,9 +2209,9 @@ class RWKV(pl.LightningModule):
                     else:
                         x = block(x)
 
-        x = self.ln_out(x)      # xzl layernorm
+        x = self.ln_out(x)      #  layernorm
 
-        if args.head_qk > 0:            # xzl: "head_qk" trick...applied to outout.?? to udnerstand better? 
+        if args.head_qk > 0:            # : "head_qk" trick...applied to outout.?? to udnerstand better? 
             q = self.head_q(x)[:, :T, :]
             k = self.head_k(x)[:, :T, :]
             c = (q @ k.transpose(-2, -1)) * (1.0 / args.head_qk)
@@ -2231,7 +2230,7 @@ class RWKV(pl.LightningModule):
             # return self.forward_cls0(x)
             return self.forward_cls1(x)
             # return self.forward_cls2(x)
-        else:   # xzl: org classifiction head
+        else:   # : org classifiction head
             x = self.head(x)
             return x
 
@@ -2246,8 +2245,8 @@ class RWKV(pl.LightningModule):
     def forward_cls0 (self, x, target_cls=None):
         # l1 projection: x->cluster
         # x1 = self.head_l1(x).numpy() 
-        # c = np.argmax(x1,dim=1) # xzl: graident shouldn't flow here?
-        # c = torch.argmax(x1.detach(),dim=2)  # xzl: graident shouldn't flow here
+        # c = np.argmax(x1,dim=1) # : graident shouldn't flow here?
+        # c = torch.argmax(x1.detach(),dim=2)  # : graident shouldn't flow here
         xorg = self.head(x)   # output from the original cls head
 
         x1 = self.head_l1(x)
@@ -2311,11 +2310,11 @@ class RWKV(pl.LightningModule):
         return logits, xorg, target_cls
         
     def training_step(self, batch, batch_idx):
-        # xzl: a traing step ... a batch??  a called back from torch lightning
+        # : a traing step ... a batch??  a called back from torch lightning
         #   ... the "batch" formed by TL. each item  is supplied by DataLoader.__getitem__
         args = self.args
-        if args.my_qa_mask != 1:        # xzl: batch has no qa masking
-            idx, targets = batch   # xzl: idx: input token idx, size(B,T) (cf forward above), targets=true output idx            
+        if args.my_qa_mask != 1:        # : batch has no qa masking
+            idx, targets = batch   # : idx: input token idx, size(B,T) (cf forward above), targets=true output idx            
             if args.head_K > 1:
                 # token2cls = np.array(self.token2cls)
                 # tt = token2cls[targets.cpu().numpy()]
@@ -2355,12 +2354,12 @@ class RWKV(pl.LightningModule):
                 # loss1 = F.cross_entropy(logits1.view(-1, logits1.size(-1)), target_clusters.view(-1))
                 # loss2 = F.cross_entropy(logits2.view(-1, logits2.size(-1)), target_idx_in_cluster.view(-1))
                 # loss = loss1 * loss2
-                # logits = logits1  # xzl: cat logits1,2??
+                # logits = logits1  # : cat logits1,2??
 
                 loss1 = F.cross_entropy(logits1.view(-1, logits1.size(-1)), target_clusters.view(-1), reduction='none')
                 loss2 = F.cross_entropy(logits2.view(-1, logits2.size(-1)), target_idx_in_cluster.view(-1), reduction='none')
                 loss = (loss1 * loss2).mean()
-                logits = logits1  # xzl: cat logits1,2??
+                logits = logits1  # : cat logits1,2??
                 '''
 
                 # approach 4:  loss as KV divgenrce 
@@ -2394,9 +2393,9 @@ class RWKV(pl.LightningModule):
                 # breakpoint()
                 logits = myclslogits
             else: 
-                logits = self(idx)          # xzl: a normal fwd pass...
+                logits = self(idx)          # : a normal fwd pass...
                 loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-                # xzl: dump gradient graph
+                # : dump gradient graph
                 # import torchviz
                 # dot=torchviz.make_dot(logits, params=dict(self.named_parameters()))
                 # dot.render("mymodel", format="png")
@@ -2408,7 +2407,7 @@ class RWKV(pl.LightningModule):
             #     print('idx', idx)
             #     exit(0)
         else:
-            idx, targets, mask = batch      # xzl: batch has qa masking (... kinda dirty hacks
+            idx, targets, mask = batch      # : batch has qa masking (... kinda dirty hacks
             mask = mask.view(-1)
             sum_mask = torch.sum(mask).item()
             # if sum_mask == 0:
@@ -2453,7 +2452,7 @@ class RWKV(pl.LightningModule):
 ############################################################################
 """
         )
-        m = {}      # xzl: return init weights. name->tensor
+        m = {}      # : return init weights. name->tensor
         n_params = 0
         for n in self.state_dict():
             p = self.state_dict()[n]
@@ -2466,24 +2465,24 @@ class RWKV(pl.LightningModule):
             print(f"{s0.ljust(5)} {s1.ljust(5)} {s2.ljust(5)} {s3.ljust(5)} {n}", end="")
 
             scale = 1.0
-            # xzl: init weights w different strategy..... n: weight name
+            # : init weights w different strategy..... n: weight name
             if "ln_" in n or ".ln" in n or "time_" in n or "_mask" in n or "pos_emb" in n \
                 or '.mask.' in n or n.endswith('_w') or n.endswith('_w1') \
                 or n.endswith('_w2') or n.endswith('_bias') or (".weight" not in n):
                 if 'ln_x.weight' in n:
-                    layer_scale = (1+int(n.split('.')[1])) / self.args.n_layer      # xzl: =layerNum/Nlayer?
-                    m[n] = (p * 0.0) + (layer_scale ** 0.7)     # xzl: scale by layer?
+                    layer_scale = (1+int(n.split('.')[1])) / self.args.n_layer      # : =layerNum/Nlayer?
+                    m[n] = (p * 0.0) + (layer_scale ** 0.7)     # : scale by layer?
                 else:
-                    m[n] = p       # xzl: as is, just 0s?
+                    m[n] = p       # : as is, just 0s?
                 print()
             elif "_diag" in n and "att." in n:  
-                # xzl: e.g. "att.gate_diag". init with small scale...
+                # : e.g. "att.gate_diag". init with small scale...
                 m[n] = p
                 scale = -1e-4
                 nn.init.uniform_(m[n], a=scale, b=-scale)
                 print(f" [scale {scale}]")
             elif "_diag" in n and "ffn." in n:  
-                # xzl: e.g. "ffn.receptance_diag". init with small scale... (same as above)
+                # : e.g. "ffn.receptance_diag". init with small scale... (same as above)
                 m[n] = p
                 scale = -1e-4
                 nn.init.uniform_(m[n], a=scale, b=-scale)
@@ -2493,7 +2492,7 @@ class RWKV(pl.LightningModule):
                 scale = -1e-4
                 nn.init.uniform_(m[n], a=scale, b=-scale)
                 print(f" [scale {scale}]")
-            elif n == "head.weight" or "head_l1" in n or "head_l2" in n:        # xzl: cls head (final
+            elif n == "head.weight" or "head_l1" in n or "head_l2" in n:        # : cls head (final
                 m[n] = p
                 if self.args.vocab_size > self.args.n_embd:
                     scale = 0.5 * math.sqrt(self.args.vocab_size / self.args.n_embd)
@@ -2515,10 +2514,10 @@ class RWKV(pl.LightningModule):
                     else:
                         print()
                 else:
-                    assert n.endswith('.weight') # should always be true    xzl: means all other params should be named witih "XXX.weight"
+                    assert n.endswith('.weight') # should always be true    : means all other params should be named witih "XXX.weight"
 
                     # zero = [".att.output.", ".ffn.value.", ".ffn.receptance.", ".ffnPre.value.", ".ffnPre.receptance.", "head_q.", '.oo.', '.rr.']
-                    # xzl: to include .att.output{1|2} .ffn.value{1|2}. 
+                    # : to include .att.output{1|2} .ffn.value{1|2}. 
                     #  leave out .ffn.receptance{1|2}: if init as zero --> zero graidents 
                     zero = [".att.output", ".ffn.value", ".ffnPre.value.", ".ffnPre.receptance.", "head_q.", '.oo.', '.rr.']
 
@@ -2530,7 +2529,7 @@ class RWKV(pl.LightningModule):
                     if "head_q." in n:
                         scale = 0
 
-                    # xzl
+                    # 
                     for kk in [".att.receptance", ".att.value", ".ffn.key"]:
                         if kk in n: 
                             scale = 1.414

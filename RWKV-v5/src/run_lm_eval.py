@@ -1,7 +1,3 @@
-########################################################################################################
-# The RWKV Language Model - https://github.com/BlinkDL/RWKV-LM
-########################################################################################################
-
 '''
 run a model against lm benchmarks. 
 
@@ -29,6 +25,8 @@ torch.backends.cudnn.allow_tf32 = True
 torch.backends.cuda.matmul.allow_tf32 = True
 from torch.nn import functional as F
 
+#os.environ["RWKV_V7_ON"] = '1' # enable v7
+#os.environ["RWKV_MY_TESTING"] = "x078"
 os.environ["RWKV_JIT_ON"] = '1'
 RWKV_HOME = os.environ.get('RWKV_HOME')
 
@@ -41,25 +39,20 @@ from rwkv.utils import PIPELINE
 from lm_eval import tasks, evaluator
 from lm_eval.api.model import TemplateLM
 
-MODEL_NAME=f'{RWKV_HOME}/RWKV-v5/out/04b-pre-x59-8x-sparsity/rwkv-2405-mlp'
-MODEL_NAME=f'{RWKV_HOME}/RWKV-v5/out/04b-pre-x59-8x-sparsity/rwkv-2405-mlp'
-MODEL_NAME=f'/data/models/orin-deployment/04b-x59'
-MODEL_NAME=f'/data/models/orin-deployment/01b-x59'
-#MODEL_NAME=f'{RWKV_HOME}/RWKV-v5/out/01b-pre-x59-8x-sparsity/rwkv-1857-mlp'
-
+MODEL_NAME=f'/data/models/RWKV-5-World-1B5-v2-20231025-ctx4096.pth'
 ########################################################################################################
 # select benchmarks below 
 
 eval_tasks = [
         'lambada_openai',  # 5k tests
-        # 'lambada_standard',
-        # 'piqa',
-        # 'hellaswag',
-        # 'winogrande',       # 2k tests, fast
-        # 'arc_easy',
-        # 'arc_challenge',
-        # 'openbookqa',
-        # 'sciq',
+         #'lambada_standard',
+         #'piqa',
+         #'hellaswag',
+         #'winogrande',       # 2k tests, fast
+         #'arc_easy',
+         #'arc_challenge',
+         #'openbookqa',
+         #'sciq',
         #'leaderboard_ifeval',
         #'leaderboard_mmlu_pro',
         #'leaderboard_musr_murder_mysteries',
@@ -68,8 +61,6 @@ eval_tasks = [
         ]
 ########################################################################################################
 
-# xzl: cached logits, cache outcome "True/False"
-#       key: textual string
 logitBuf = {}
 correctBuf = {}
 
@@ -91,18 +82,11 @@ class EvalHarnessAdapter(TemplateLM):
         self.pretrained = pretrained
         self.tokenizer = TokenizerWrapper(pipeline.tokenizer)
 
-    # xzl: implement the request type "loglikelihood"....
     def _loglikelihood_tokens(self, requests, disable_tqdm=False):
         global logitBuf, correctBuf
 
         res = []
 
-        # xzl: invoke forward() for each "request"... 
-        # a request - a text sequent (like prompt?). eg openai benchmark has 
-        # ~5K requests
-        #
-        # below UNLIKE test-rwkv.chat.py: NOT using pipeline args for logits sampling 
-        #   just treat it as greedy decoder, for next token predict???
         for COUNTER in range(len(requests)):
             n = COUNTER
             raw_src = requests[n][0][0] + requests[n][0][1]
@@ -114,7 +98,7 @@ class EvalHarnessAdapter(TemplateLM):
 
             sss = str(src)
             correct = True
-            if sss in logitBuf: # xzl: cache...
+            if sss in logitBuf:
                 logit = logitBuf[sss]
                 correct = correctBuf[sss]
             else:
@@ -124,24 +108,21 @@ class EvalHarnessAdapter(TemplateLM):
                 
                 with torch.no_grad():
                     print("*",end='',flush=True)   # show progress....
-                    # xzl: below forward. send one seq to the model (i.e. shape bsz=1,L,D)
                     outputs, _ = self.pretrained.forward(src, None, full_output=True)
-                    # breakpoint()
-                    # xzl: for each token to be predicted... (q_len: prompt? 
                     for i in range(q_len-1, len(src)-1):
                         oo = outputs[i].detach().float()
-                        dst = src[i+1]  # xzl: next token, from GT
+                        dst = src[i+1] 
                         v = F.softmax(oo, dim=-1)[dst]
                         #if v == 0:
                         #    v = 0.00000000000000000000000001
-                        logit += math.log(v)    # xzl: accmulate logits for the GT token ... why?
+                        logit += math.log(v)    
                         _, s_index = torch.sort(oo, descending=True)
-                        pred = s_index[0].item()   # xzl: pred token with higehst prob? greedy?
+                        pred = s_index[0].item()
                         if pred != dst:
                             correct = False
                     outputs = None
                     pred = None
-                logitBuf[sss] = logit  # xzl: cache (accmulated) logit
+                logitBuf[sss] = logit
                 correctBuf[sss] = correct
                 #clean_cache()
             
@@ -194,12 +175,13 @@ def do_eval(model_path, isverbose=False, benchmarks=[]):
     print(f'Loading model - {model_path}')
 
     quant_bit = 1
-    quant_map = [0.95, 0.95, 0.95, 0.95, 0.95] + [0.85] * 5 + [0.8] * 14
-    mlp_map = [0.7] * 24
+    quant_map = [0.95, 0.95, 0.95, 0.95, 0.95] + [0.85] * 5 + [0.8] * 22
+    mlp_map = [0.7] * 32
 
-    #model = RWKV(model=model_path, strategy='cuda fp16', verbose=isverbose,
+    # 8/26/24: using fp16 will make some benchmarks (eg openai) nan... so use fp32
+    #model = RWKV(model=model_path, strategy='cuda fp16',
                  #quant_bit=quant_bit, quant_map=quant_map, mlp_map=mlp_map)
-    model = RWKV(model=model_path, strategy='cuda fp16', verbose=isverbose)    # nneded for cls
+    model = RWKV(model=model_path, strategy='cuda fp32', verbose=isverbose)    # nneded for cls
     pipeline = PIPELINE(model, "rwkv_vocab_v20230424")
 
     RWKV_PAD = pipeline.tokenizer.encode('\n') # we will use '\n' as PAD
@@ -213,11 +195,11 @@ def do_eval(model_path, isverbose=False, benchmarks=[]):
         bootstrap_iters=10000,
     )
 
-    if model.stat_runs != 0: 
-        print(model.stat_runs)
-        print(f"stats: runs: {model.stat_runs} \
-        cls/run {model.stat_loaded_cls/model.stat_runs:.2f} \
-        tokens/run {model.stat_loaded_tokens/model.stat_runs/65535:.2f}")
+    #if model.stat_runs != 0: 
+    #    print(model.stat_runs)
+    #    print(f"stats: runs: {model.stat_runs} \
+    #    cls/run {model.stat_loaded_cls/model.stat_runs:.2f} \
+    #    tokens/run {model.stat_loaded_tokens/model.stat_runs/65535:.2f}")
     
     return results['results']
 

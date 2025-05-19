@@ -6,8 +6,6 @@ See LICENSE folder for this sample’s licensing information.
 Abstract:
 The code for compiling the custom pytorch extension.
 
-xzl: showcases how metal wkv5 op can be called 
-
 orig code:
 "This sample code project is associated with WWDC23 session 10050: [Optimize machine learning for Metal apps](https://developer.apple.com/wwdc23/10050)."
 
@@ -26,7 +24,7 @@ H=C//HEAD_SIZE
 
 # wraps native code as a py module(?
 wkv5_metal = torch.utils.cpp_extension.load(
-    name='wkv5',        # xzl: useful??
+    name='wkv5',      
     sources=['wkv5_op.mm'],
     # verbose=True, 
     extra_cflags=['-std=c++17', '-O3', f"-D_N_={HEAD_SIZE}"],
