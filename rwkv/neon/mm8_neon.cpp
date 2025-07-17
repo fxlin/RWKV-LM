@@ -203,15 +203,20 @@ void kernel_mm_one_fp16i8_v2(
 }
 
 // v3, using openmp, private accumulators to avoid race 
+// 7.17.25 revisited. NB: this is gemv (i.e. mm_one) understood 75%
+//  x: 1xN, w:NxM, y:1xM... a thread: process each weight row, load 8 elements at a time, process
+//      that is, vectorize along M.   then partition among threads along N (if needed)
+//  that is, for each element in x, load one whole row of w, process, accumulate results to M elements
+//    so on so forth....
 void kernel_mm_one_fp16i8_v3(
     int N, int M,
     const at::Half* x_fp16,
     const uint8_t* w, int w_stride,
-    const at::Half* mx_fp16,
-    const at::Half* rx_fp16,
-    const at::Half* my_fp16,
-    const at::Half* ry_fp16,
-    float* y_fp)
+    const at::Half* mx_fp16,    // per-column bias for a column in w  (after scaling)
+    const at::Half* rx_fp16,    // per-column scale for a column in w 
+    const at::Half* my_fp16,    // per-row bias for a row in w (afetr scaling
+    const at::Half* ry_fp16,    // per-row scale for a row in w
+    float* y_fp)        // fxl: final res in fp32
 {
     // Initialize y_fp to zero
     std::fill(y_fp, y_fp + M, float(0.0));
@@ -245,6 +250,7 @@ void kernel_mm_one_fp16i8_v3(
             float16_t my_j = static_cast<float16_t>(my_fp16[j]);
 
             // Broadcast x_j, ry_j, my_j into NEON vectors
+            //   fxl: only one element from x
             float16x8_t x_j_vec = vdupq_n_f16(x_j);
             float16x8_t ry_j_vec = vdupq_n_f16(ry_j);
             float16x8_t my_j_vec = vdupq_n_f16(my_j);
@@ -269,12 +275,14 @@ void kernel_mm_one_fp16i8_v3(
                 float16x8_t rx_k_vec = vld1q_f16(&rx_fp16_data[k]);
                 float16x8_t mx_k_vec = vld1q_f16(&mx_fp16_data[k]);
 
+                // fxl: below, scale and offset weights 
                 // Compute temp_fp16 = (w_vec_fp16 * ry_j_vec * rx_k_vec) + my_j_vec + mx_k_vec
                 float16x8_t temp_fp16 = vmulq_f16(w_vec_fp16, ry_j_vec); // (w + 0.5) * ry_j
                 temp_fp16 = vmulq_f16(temp_fp16, rx_k_vec);              // * rx_k
                 temp_fp16 = vaddq_f16(temp_fp16, my_j_vec);              // + my_j
                 temp_fp16 = vaddq_f16(temp_fp16, mx_k_vec);              // + mx_k
 
+                // fxl: weights dequant done. below: do the actual multiplication (res in fp16? not fp32?
                 // Multiply x_j_vec * temp_fp16
                 float16x8_t prod_fp16 = vmulq_f16(x_j_vec, temp_fp16);
 
@@ -826,6 +834,9 @@ void kernel_mm_one_fp32i8_v3(
 
 #ifdef HAS_NEON_FP16
 // cf: rwkv/cuda/operators.cu  kernel_mm_seq_fp16i8()
+// 7.17.2025 revisited... W: NxM, x: BxN, y: BxM. 
+// vectorize (8x) along M; multithreading along B. therefore no across-thread reduction needed at the end
+//    each thread produces a subset of B rows in the final results 
 void kernel_mm_seq_fp16i8(
     const int B, const int N, const int M,
     const at::Half* x_fp16, const int x_stride,
@@ -858,7 +869,7 @@ void kernel_mm_seq_fp16i8(
         // Initialize y_batch to zero
         std::fill(y_batch, y_batch + M, float(0.0));
 
-        // Loop over N dimension
+        // Loop over N dimension   (each time, 1 element, then bdcast to 8 simd lanes for mult)
         for (int j = 0; j < N; ++j) {
             float16_t x_j = static_cast<float16_t>(x_batch[j]);
             float16_t ry_j = ry_fp16_data[j];

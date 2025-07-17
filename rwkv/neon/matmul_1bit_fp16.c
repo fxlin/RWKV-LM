@@ -21,6 +21,7 @@
 #include <assert.h>
 #include <omp.h>     // For OpenMP
 
+// reference impl, no neon, no openmp
 void matmul_1bit_fp16(const uint8_t* weight_1bit, const float16_t* input_fp16, float16_t* output_fp16, 
                       const float16_t* bias_fp16, int M, int N, int K, float16_t scale) {
     // M: Number of rows of output
@@ -45,7 +46,7 @@ void matmul_1bit_fp16(const uint8_t* weight_1bit, const float16_t* input_fp16, f
 
     for (int m = 0; m < M; ++m) {
         for (int n = 0; n < N; ++n) {
-            float16_t sum = bias_fp16[m];
+            float16_t sum = bias_fp16[m];  // one bias per row 
 
             for (int k = 0; k < K; ++k) {
                 // Extract the bit from weight_1bit
@@ -60,7 +61,7 @@ void matmul_1bit_fp16(const uint8_t* weight_1bit, const float16_t* input_fp16, f
                 // Load input value
                 float16_t input_value = input_fp16[k * N + n];
 
-                if (isnan(input_value)) {
+                if (isnan(input_value)) {   // debugging
                     // printf("WARNING k: %d, n: %d, k*N+n: %d\n", k, n, k * N + n);
                     // printf("input_fp16[%d][%d] = %f\n", k, n, (float)input_fp16[k * N + n]);
 
@@ -236,9 +237,11 @@ void matmul_1bit_fp16_neon(
     for (int m = 0; m < M; ++m) {
         for (int n = 0; n < N; n += 8) { // Process 8 columns at a time
             // Initialize sum vector with bias
-            float16x8_t sum_vec = vdupq_n_f16(bias_fp16[m]);
+            float16x8_t sum_vec = vdupq_n_f16(bias_fp16[m]); // one bias for each weight row
 
-            for (int k = 0; k < K; ++k) {
+            for (int k = 0; k < K; ++k) { 
+                // through each 1-bit weight.... unpack.  
+                //      XXX can be further optimized (unpack 8 weights to one fp16x8 in one single op??)
                 // Calculate bit index
                 int bit_index = m * K + k;
                 int byte_index = bit_index / 8;
@@ -251,6 +254,7 @@ void matmul_1bit_fp16_neon(
                 uint8_t bit = (byte >> bit_offset) & 1;
 
                 // Create a 16-bit mask: all bits set if bit is 1, else 0
+                // INTERSETING: using bitmask to select between scale/-scale, then multiply
                 uint16_t mask_val = bit ? 0xFFFF : 0x0000;
 
                 // Duplicate the mask across all 16-bit lanes
@@ -404,5 +408,5 @@ Results match!
 
 std: >10 sec
 neon v3 with openmp static schedule ... 1.6 sec
-neon v3 w/o openmp .... 1.3 sec (better than no openmp??) why
+neon v3 w/o openmp .... 1.3 sec (better than no openmp??) why (memory bandwidth bound???
 */
